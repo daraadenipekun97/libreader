@@ -56,7 +56,7 @@ let App = function (el) {
     });
     this.qs("button.prev").addEventListener("click", () => this.state.rendition.prev());
     this.qs("button.next").addEventListener("click", () => this.state.rendition.next());
-    this.qs("button.open").addEventListener("click", () => this.doOpenBook());
+    this.qs("button.open").addEventListener("click", () => window.history.back());
 
     try {
         this.qs(".bar .loc").style.cursor = "pointer";

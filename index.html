@@ -153,14 +153,14 @@
                         <div class="setting">
                             <div class="setting-label">About</div>
                             <div class="setting-content">
-                                ePubViewer v3.1.0
+                                <!-- ePubViewer v3.1.0
                                 <br /> Copyright 2019
                                 <a href="https://pgaskin.net">Patrick Gaskin</a>
                                 <br />
                                 <a href="https://github.com/pgaskin/ePubViewer">Code</a> |
                                 <a href="https://github.com/pgaskin/ePubViewer/issues">Report an issue</a>
-                                <br />
-                                <br /> This app requires Microsoft Edge 15+, Mozilla Firefox 50+, Chrome 50+, or Safari 10+.
+                                <br /> -->
+                                 This app requires Microsoft Edge 15+, Mozilla Firefox 50+, Chrome 50+, or Safari 10+.
                             </div>
                         </div>
                     </div>
@@ -175,8 +175,9 @@
         </div>
         <div class="bar">
             <div class="left">
-                <button class="open">
-                    <i class="icon material-icons-outlined">open_in_browser</i>
+                <button class="open" style="display:flex; align-items: center;">
+                    <i class="icon material-icons-outlined">chevron_left</i> 
+                    <p>Back to Book</p>
                 </button>
             </div>
             <div class="title">
@@ -217,7 +218,7 @@
         </div>
     </div>
 
-    <script src="https://geek1011.net/epubviewer-inject.js"></script>
+    <!-- <script src="https://geek1011.net/epubviewer-inject.js"></script> -->
 
     <script>
         function isIE(userAgent) {
@@ -227,7 +228,7 @@
         if (isIE()) alert("ePubViewer does not support Internet Explorer. Please use Chrome or Firefox.");
     </script>
 
-    <script>
+    <!-- <script>
         if ('serviceWorker' in navigator) window.addEventListener('load', () => {
             navigator.serviceWorker.register('sw.js').then(reg => {
                 reg.onupdatefound = () => {
@@ -243,7 +244,7 @@
         try {
             window.caches.keys().then(keys => console.log("caches: " + keys.join(", "))).catch(err => console.log("error checking cache version"));
         } catch (err) { }
-    </script>
+    </script> -->
 
     <script src="polyfills/babel-polyfill.min.js"></script>
     <script src="polyfills/fetch.js"></script>
@@ -264,7 +265,7 @@
 
     <script src="script.js"></script>
 
-    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-66226417-1"></script>
+    <!-- <script async src="https://www.googletagmanager.com/gtag/js?id=UA-66226417-1"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
         function gtag() {
@@ -272,7 +273,7 @@
         }
         gtag('js', new Date());
         gtag('config', 'UA-66226417-1');
-    </script>
+    </script> -->
 </body>
 
 </html>

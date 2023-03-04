@@ -15,7 +15,7 @@ window.onerror = function (msg, url, line, column, err) {
     if (msg.indexOf("Object expected") > -1 && url.indexOf("epub") > -1) return;
     document.querySelector(".app .error").classList.remove("hidden");
     document.querySelector(".app .error .error-title").innerHTML = "Error";
-    document.querySelector(".app .error .error-description").innerHTML = "Please try reloading the page or using a different browser (Chrome or Firefox), and if the error still persists, <a href=\"https://github.com/pgaskin/ePubViewer/issues\">report an issue</a>.";
+    document.querySelector(".app .error .error-description").innerHTML = "Please try reloading the page or using a different browser (Chrome or Firefox)";
     document.querySelector(".app .error .error-info").innerHTML = msg;
     document.querySelector(".app .error .error-dump").innerHTML = JSON.stringify({
         error: err.toString(),
@@ -203,7 +203,7 @@ App.prototype.fatal = function (msg, err, usersFault) {
     console.error(msg, err);
     document.querySelector(".app .error").classList.remove("hidden");
     document.querySelector(".app .error .error-title").innerHTML = "Error";
-    document.querySelector(".app .error .error-description").innerHTML = usersFault ? "" : "Please try reloading the page or using a different browser, and if the error still persists, <a href=\"https://github.com/pgaskin/ePubViewer/issues\">report an issue</a>.";
+    document.querySelector(".app .error .error-description").innerHTML = usersFault ? "" : "Please try reloading the page or using a different browser.";
     document.querySelector(".app .error .error-info").innerHTML = msg + ": " + err.toString();
     document.querySelector(".app .error .error-dump").innerHTML = JSON.stringify({
         error: err.toString(),
@@ -236,7 +236,7 @@ App.prototype.doReset = function () {
     this.qs(".info .series-index").innerHTML = "";
     this.qs(".info .author").innerHTML = "";
     this.qs(".info .description").innerHTML = "";
-    this.qs(".book").innerHTML = '<div class="empty-wrapper"><div class="empty"><div class="app-name">ePubViewer</div><div class="message"><a href="javascript:ePubViewer.doOpenBook();" class="big-button">Open a Book</a></div></div></div>';
+    this.qs(".book").innerHTML = '<div class="empty-wrapper"><div class="empty"><div class="app-name">LibriBooks</div><div class="message"><a href="javascript:ePubViewer.doOpenBook();" class="big-button">Open a Book</a></div></div></div>';
     this.qs(".sidebar-button").classList.add("hidden");
     this.qs(".bar button.prev").classList.add("hidden");
     this.qs(".bar button.next").classList.add("hidden");

@@ -541,11 +541,13 @@ App.prototype.onRenditionRelocatedUpdateIndicators = function (event) {
         if (this.getChipActive("progress") == "none") {
             stxt = "";
         } else if (this.getChipActive("progress") == "location" && event.start.location > 0) {
-            stxt = `Loc ${event.start.location}/${this.state.book.locations.length()}`
-        } else if (this.getChipActive("progress") == "chapter") {
-            let navItem = this.getNavItem(event, false) || this.getNavItem(event, true);
-            stxt = navItem ? navItem.label.trim() : (event.start.percentage > 0 && event.start.percentage < 1) ? `${Math.round(event.start.percentage * 100)}%` : "";
-        } else {
+            stxt = `Page ${event.start.location}/${this.state.book.locations.length()}`
+        } 
+        // else if (this.getChipActive("progress") == "chapter") {
+        //     let navItem = this.getNavItem(event, false) || this.getNavItem(event, true);
+        //     stxt = navItem ? navItem.label.trim() : (event.start.percentage > 0 && event.start.percentage < 1) ? `${Math.round(event.start.percentage * 100)}%` : "";
+        // } 
+        else {
             stxt = (event.start.percentage > 0 && event.start.percentage < 1) ? `${Math.round(event.start.percentage * 1000)/10}%` : "";
         }
         this.qs(".bar .loc").innerHTML = stxt;

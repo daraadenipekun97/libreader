@@ -108,10 +108,30 @@ App.prototype.doBook = function (url, opts) {
         this.state.book = ePub(url, opts);
         this.qs(".book").innerHTML = "";
         this.state.rendition = this.state.book.renderTo(this.qs(".book"), {});
+        
+
+        this.state.book.loaded.spine.then((spine) => {
+        spine.each((item) => {
+            item.load(this.state.book.load.bind(this.state.book)).then((contents) => {
+            //  console.log(contents);
+            let epubText = contents.getElementsByTagName("body")[0].innerText;
+            let epubBodyTag = contents.getElementsByTagName("body")[0]
+            window.globalVariable = {
+                epubText: epubText,
+                epubBodyTag:epubBodyTag
+            }
+            });
+        });
+        });
+
     } catch (err) {
         this.fatal("error loading book", err);
         throw err;
     }
+
+
+
+
 
     this.state.book.ready.then(this.onBookReady.bind(this)).catch(this.fatal.bind(this, "error loading book"));
 
@@ -136,7 +156,18 @@ App.prototype.doBook = function (url, opts) {
     if (this.state.dictInterval) window.clearInterval(this.state.dictInterval);
     this.state.dictInterval = window.setInterval(this.checkDictionary.bind(this), 50);
     this.doDictionary(null);
+
+
+        
+   
 };
+
+
+
+
+
+
+
 
 App.prototype.loadSettingsFromStorage = function () {
     ["theme", "font", "font-size", "line-spacing", "margin", "progress"].forEach(container => this.restoreChipActive(container));
@@ -236,7 +267,8 @@ App.prototype.doReset = function () {
     this.qs(".info .series-index").innerHTML = "";
     this.qs(".info .author").innerHTML = "";
     this.qs(".info .description").innerHTML = "";
-    this.qs(".book").innerHTML = '<div class="empty-wrapper"><div class="empty"><div class="app-name">LibriBooks</div><div class="message"><a href="javascript:ePubViewer.doOpenBook();" class="big-button">Open a Book</a></div></div></div>';
+    // this.qs(".book").innerHTML = '<div class="empty-wrapper"><div class="empty"><div class="app-name">LibriBooks</div><div class="message"><a href="javascript:ePubViewer.doOpenBook();" class="big-button">Open a Book</a></div></div></div>';
+    this.qs(".book").innerHTML = "";
     this.qs(".sidebar-button").classList.add("hidden");
     this.qs(".bar button.prev").classList.add("hidden");
     this.qs(".bar button.next").classList.add("hidden");
@@ -571,6 +603,7 @@ App.prototype.onRenditionStartedRestorePos = function (event) {
 };
 
 App.prototype.checkDictionary = function () {
+    
     try {
         let selection = (this.state.rendition.manager && this.state.rendition.manager.getContents().length > 0) ? this.state.rendition.manager.getContents()[0].window.getSelection().toString().trim() : "";
         if (selection.length < 2 || selection.indexOf(" ") > -1) {
@@ -581,6 +614,7 @@ App.prototype.checkDictionary = function () {
         this.state.showDictTimeout = window.setTimeout(() => {
             try {
                 let newSelection = this.state.rendition.manager.getContents()[0].window.getSelection().toString().trim();
+                console.log(newSelection)
                 if (newSelection == selection) this.doDictionary(newSelection);
             } catch (err) {console.error(`showDictTimeout: ${err.toString()}`)}
         }, 300);
@@ -676,6 +710,7 @@ App.prototype.doDictionary = function (word) {
 };
 
 App.prototype.doFullscreen = () => {
+    debugger
     document.fullscreenEnabled = document.fullscreenEnabled || document.mozFullScreenEnabled || document.documentElement.webkitRequestFullScreen;
 
     let requestFullscreen = element => {

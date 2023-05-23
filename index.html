@@ -37,6 +37,9 @@
                     <a data-tab="settings" class="item">
                         <i class="icon material-icons-outlined">settings</i>
                     </a>
+                    <a data-tab="audio" class="item">
+                        <i class="icon material-icons-outlined">volume_up</i>
+                    </a>
                 </div>
                 <div class="tab-container">
                     <div class="tab" data-tab="toc">
@@ -165,6 +168,56 @@
                             </div> -->
                         </div>
                     </div>
+                    <div class="tab audio" data-tab="audio">
+                        <div class="setting">
+                            <div class="setting-label">Text to Speech</div>
+                            <div class="init-status-header">Status</div>
+                            <div class="setting-content progress chips" data-chips="progress">
+                                <div class="tts-start-stop">
+                                    <div class="tts-start speak-btn">start</div> &nbsp;
+                                <div class="tts-start stop-btn">stop</div> &nbsp;
+                                <div class="tts-start pause-btn">pause</div> &nbsp;
+                                <div class="tts-start resume-btn">resume</div> 
+
+                                </div>
+                                
+                                <hr>
+                                <div class="volume">
+                                    <label for="volume-input" class="label">Volume</label> &nbsp;
+                                    <span class="volume-value">1</span> <br>
+                                    <input type="range" class="form-range slider" min="0" max="100" disabled step="1" id="volume-input" value="1">
+                                </div>
+                                <hr>
+                                <div class="rate">
+                                    <label for="rate-input" class="form-label">Rate(Speed)</label> &nbsp;
+                                    <span class="float-end rate-value">1</span><br>
+                                    <input type="range" class="form-range slider" min="1" max="20" disabled step="1" id="rate-input" value="10">
+
+                                </div>
+                                <hr>
+                                <div class="pitch">
+                                    <label for="pitch-input" class="form-label">Pitch</label> &nbsp;
+                                    <span class="float-end pitch-value">1</span> <br>
+                                    <input type="range" class="form-range slider" min="0" max="2" disabled step="0.1" id="pitch-input" value="1">
+                                </div>
+                                <hr>
+                                <!-- selects -->
+                                <div class="card-body">
+                                    <select id="lang-select" class="disabled dropdown" disabled>
+                                        <option>Select language</option>
+                                    </select>
+                                    <select id="voice-select" class="disabled dropdown" disabled>
+                                        <option>Select voice</option>
+                                    </select>
+                                </div>
+                                <div class="input-box" style="display:none">
+                                    <textarea rows="3" class="form-control" id="text-input"
+                                    disabled
+                                    placeholder="enter text to speak"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -204,6 +257,11 @@
                 </div>
             </div>
         </div>
+        
+        <!-- <button onclick="ePubViewer.getLocalStore()">Click</button> -->
+
+      
+
         <div class="bar">
             <div class="left">
                 <button class="prev hidden">
@@ -265,6 +323,11 @@
     </script>
 
     <script src="script.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/easy-speech/dist/EasySpeech.iife.js"></script>
+
+    <script src="speech.js"></script>
+
 
     <!-- <script async src="https://www.googletagmanager.com/gtag/js?id=UA-66226417-1"></script>
     <script>

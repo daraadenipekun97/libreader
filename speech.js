@@ -10,6 +10,8 @@ document.body.onload = async () => {
   initEvents(initialized)
 }
 
+
+
 let logBody
 let filteredVoices
 
@@ -111,7 +113,7 @@ async function populateVoices (initialized) {
   debug('find unique languages...')
   const voices = EasySpeech.voices()
   const languages = new Set()
-
+  // console.log(voices)
   voices.forEach(voice => {
     languages.add(voice.lang.split(/[-_]/)[0])
   })
@@ -178,6 +180,7 @@ async function populateVoices (initialized) {
   inputs.language.removeAttribute('disabled')
 }
 
+
 function initSpeak (inititalized) {
   if (!inititalized) return
 
@@ -185,7 +188,9 @@ function initSpeak (inititalized) {
   const stopButton = document.querySelector('.stop-btn');
   const pauseButton = document.querySelector('.pause-btn');
   const resumeButton = document.querySelector('.resume-btn');
-  const textArea = document.querySelector('#text-input')
+  const textArea = document.querySelector('#text-input');
+  const backBtn = document.querySelector('.open');
+  const nextBtn = document.querySelector('.next');
   const allInputs = Object.values(inputs)
 
   speakButton.addEventListener('click', async event => {
@@ -216,7 +221,39 @@ function initSpeak (inititalized) {
             boundary: event => {
                 const { charIndex, charLength } = event;
                 window.globalVariable.epubBodyTag.innerText =  highlight(text, charIndex, charIndex + charLength)
+            },
+            start: event => {
+              nextBtn.addEventListener("click", handleClick);
+
+              backBtn.addEventListener("click", handleClickBack);
+
+              function handleClick(event) {
+                if (event.isTrusted) {
+                  stopButton.click();
+                  // setTimeout(() => {
+                  //   speakButton.click();
+                  // }, 3000)
+                } else {
+                  // alert("Button clicked programmatically.");
+                }
+              }
+
+              function handleClickBack() {
+
+                stopButton.click();
+                
+              }
+
+            },
+            end: event => {
+              if(event.elapsedTime){
+                nextBtn.click()
+                setTimeout(() => {
+                  speakButton.click();
+                }, 3000)
+              }
             }
+        
         })
     } catch (e) {
       debug(e.message)
@@ -227,6 +264,7 @@ function initSpeak (inititalized) {
       })
     }
   })
+
 
   stopButton.addEventListener('click', async event => {
     stopButton.disabled = true
@@ -296,6 +334,8 @@ function appendFeatures (detected) {
     }
   })
 
+  
+
   const text = document.createTextNode(JSON.stringify(features, null, 2))
 //   featuresTarget.appendChild(text)
 console.log(JSON.stringify(features, null, 2))
@@ -320,3 +360,5 @@ const textNode = (text, parent = 'div') => {
   entry.appendChild(document.createTextNode(text))
   return entry
 }
+
+

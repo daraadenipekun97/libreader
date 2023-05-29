@@ -706,11 +706,14 @@
 }
 
 .danger{
-    border: 1px solid red;
+    color: white;
+    background-color: red;
+    border-radius: 5px;
+    padding: 5px; 
 }
 
 .info{
-    border: 1px solid #ddd;
+    border: 2px solid #ddd;
 }
 
 

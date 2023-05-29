@@ -55,8 +55,13 @@ let App = function (el) {
         }));
     });
     this.qs("button.prev").addEventListener("click", () => this.state.rendition.prev());
-    this.qs("button.next").addEventListener("click", () => this.state.rendition.next());
+    this.qs("button.next").addEventListener("click", () => {
+        this.qs("button.next").classList.add("clicked")
+        this.state.rendition.next()
+        this.state.book.ready.then(this.onRenditionRestoreCurrentPos.bind(this, this.state.rendition.currentLocation())).catch(this.fatal.bind(this, "error loading current book page"));
+    });
     this.qs("button.open").addEventListener("click", () => window.history.back());
+
 
     try {
         this.qs(".bar .loc").style.cursor = "pointer";
@@ -95,6 +100,49 @@ let App = function (el) {
     this.applyTheme();
 };
 
+
+App.prototype.makeRangeCfi =  function (a, b){
+    const CFI = new ePub.CFI()
+    const start = CFI.parse(a), end = CFI.parse(b)
+    const cfi = {
+        range: true,
+        base: start.base,
+        path: {
+            steps: [],
+            terminal: null
+        },
+        start: start.path,
+        end: end.path
+    }
+    const len = cfi.start.steps.length
+    for (let i = 0; i < len; i++) {
+        if (CFI.equalStep(cfi.start.steps[i], cfi.end.steps[i])) {
+            if (i == len - 1) {
+                // Last step is equal, check terminals
+                if (cfi.start.terminal === cfi.end.terminal) {
+                    // CFI's are equal
+                    cfi.path.steps.push(cfi.start.steps[i])
+                    // Not a range
+                    cfi.range = false
+                }
+            } else cfi.path.steps.push(cfi.start.steps[i])
+        } else break
+    }
+    cfi.start.steps = cfi.start.steps.slice(cfi.path.steps.length)
+    cfi.end.steps = cfi.end.steps.slice(cfi.path.steps.length)
+
+    return 'epubcfi(' + CFI.segmentString(cfi.base)
+        + '!' + CFI.segmentString(cfi.path)
+        + ',' + CFI.segmentString(cfi.start)
+        + ',' + CFI.segmentString(cfi.end)
+        + ')'
+}
+
+
+
+
+
+
 App.prototype.doBook = function (url, opts) {
     this.qs(".book").innerHTML = "Loading";
 
@@ -124,16 +172,24 @@ App.prototype.doBook = function (url, opts) {
         });
         });
 
+
+       
+
+        
+
+
     } catch (err) {
         this.fatal("error loading book", err);
         throw err;
     }
 
 
+    
 
-
-
+    
     this.state.book.ready.then(this.onBookReady.bind(this)).catch(this.fatal.bind(this, "error loading book"));
+    this.state.book.ready.then(this.onRenditionRestoreCurrentPos.bind(this)).catch(this.fatal.bind(this, "error loading current book page"));
+
 
     this.state.book.loaded.navigation.then(this.onNavigationLoaded.bind(this)).catch(this.fatal.bind(this, "error loading toc"));
     this.state.book.loaded.metadata.then(this.onBookMetadataLoaded.bind(this)).catch(this.fatal.bind(this, "error loading metadata"));
@@ -156,9 +212,6 @@ App.prototype.doBook = function (url, opts) {
     if (this.state.dictInterval) window.clearInterval(this.state.dictInterval);
     this.state.dictInterval = window.setInterval(this.checkDictionary.bind(this), 50);
     this.doDictionary(null);
-
-
-        
    
 };
 
@@ -340,7 +393,7 @@ App.prototype.onNavigationLoaded = function (nav) {
             handleItems(item.subitems, indent + 1);
         });
     };
-    handleItems(nav.toc, 0);
+    handleItems(nav.toc, 0); 
 };
 
 App.prototype.onRenditionRelocated = function (event) {
@@ -397,7 +450,7 @@ App.prototype.onKeyUp = function (event) {
 App.prototype.onRenditionClick = function (event) {
     try {
         if (event.target.tagName.toLowerCase() == "a" && event.target.href) return;
-        if (event.target.parentNode.tagName.toLowerCase() == "a" && event.target.parentNode.href) return;
+        if (event.target.parentNoprevde.tagName.toLowerCase() == "a" && event.target.parentNode.href) return;
         if (window.getSelection().toString().length !== 0) return;
         if (this.state.rendition.manager.getContents()[0].window.getSelection().toString().length !== 0) return;
     } catch (err) {}
@@ -532,7 +585,7 @@ App.prototype.onRenditionRelocatedUpdateIndicators = function (event) {
             range.max = this.state.book.locations.length();
             range.value = event.start.location;
             range.addEventListener("change", () => this.state.rendition.display(this.state.book.locations.cfiFromLocation(range.value)), false);
-
+    
             let markers = bar.appendChild(document.createElement("div"));
             markers.style.position = "absolute";
             markers.style.width = "100%";
@@ -590,17 +643,110 @@ App.prototype.onRenditionRelocatedUpdateIndicators = function (event) {
 
 App.prototype.onRenditionRelocatedSavePos = function (event) {
     localStorage.setItem(`${this.state.book.key()}:pos`, event.start.cfi);
+    localStorage.setItem(`${this.state.book.key()}:posend`, event.end.cfi);
+
+
 };
 
 App.prototype.onRenditionStartedRestorePos = function (event) {
     try {
         let stored = localStorage.getItem(`${this.state.book.key()}:pos`);
+        let storedend = localStorage.getItem(`${this.state.book.key()}:posend`);
+
         console.log("storedPos", stored);
+        console.log("storedEndPos", storedend);
         if (stored) this.state.rendition.display(stored);
+
     } catch (err) {
         this.fatal("error restoring position", err);
     }
 };
+
+
+
+
+
+App.prototype.onRenditionUpdateCurrentPos = function (event) {
+
+   
+
+
+    this.state.book.getRange(this.makeRangeCfi(event.start.cfi, event.end.cfi)).then(range => {
+        window.globalVariable = {
+            epubText: range.toString(),
+            epubBodyTag:""
+        }
+        console.log("currentNextBtnString " + range.toString())
+    })
+
+
+
+};
+
+
+App.prototype.onFirstRenditionUpdateCurrentPos = function (event) {
+
+    this.state.book.getRange(this.makeRangeCfi(event.start.cfi, event.end.cfi)).then(range => {
+        window.globalVariable = {
+            epubText: range.toString(),
+            epubBodyTag:""
+        }
+        console.log("currentFirstString clicked " + range.toString())
+    })
+    
+}
+
+
+
+App.prototype.onRenditionRestoreCurrentPos = function (event, location) {
+    debugger
+    const nextBtn = document.querySelector('.next');
+
+
+
+    try {
+
+        if(nextBtn.classList.contains("clicked")){
+                
+                this.state.rendition.on("relocated", this.onRenditionUpdateCurrentPos.bind(this));
+        }
+        else{
+            let stored = localStorage.getItem(`${this.state.book.key()}:pos`);
+        let storedend = localStorage.getItem(`${this.state.book.key()}:posend`);
+
+        
+
+        // console.log("current" + stored);
+        // console.log("currentEnd" + storedend)
+
+        if (stored) {
+
+            this.state.book.getRange(this.makeRangeCfi(stored, storedend)).then(range => {
+                window.globalVariable = {
+                    epubText: range.toString(),
+                    epubBodyTag:""
+                }
+                console.log("currentStoredString  " + range.toString())
+            })
+            
+        } else {
+
+            this.state.rendition.on("relocated", this.onFirstRenditionUpdateCurrentPos.bind(this));
+
+            
+        }
+
+
+          
+        }
+    } catch (err) {
+        this.fatal("error restoring current position", err);
+    }
+};
+
+
+
+
 
 App.prototype.checkDictionary = function () {
     

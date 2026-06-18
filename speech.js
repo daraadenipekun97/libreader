@@ -220,7 +220,7 @@ function initSpeak (inititalized) {
             volume,
             boundary: event => {
                 const { charIndex, charLength } = event;
-                window.globalVariable.epubBodyTag.innerText =  highlight(text, charIndex, charIndex + charLength)
+                window.globalVariableTag.epubBodyTag.innerText =  highlight(text, charIndex, charIndex + charLength)
             },
             start: event => {
               nextBtn.addEventListener("click", handleClick);

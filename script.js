@@ -144,6 +144,7 @@ App.prototype.makeRangeCfi =  function (a, b){
 
 
 App.prototype.doBook = function (url, opts) {
+    // debugger
     this.qs(".book").innerHTML = "Loading";
 
     opts = opts || {
@@ -161,13 +162,17 @@ App.prototype.doBook = function (url, opts) {
         this.state.book.loaded.spine.then((spine) => {
         spine.each((item) => {
             item.load(this.state.book.load.bind(this.state.book)).then((contents) => {
-            //  console.log(contents);
+           
             let epubText = contents.getElementsByTagName("body")[0].innerText;
             let epubBodyTag = contents.getElementsByTagName("body")[0]
+            // console.log("bodyTag " + epubBodyTag.innerText);
             window.globalVariable = {
                 epubText: epubText,
+            }
+            window.globalVariableTag = {
                 epubBodyTag:epubBodyTag
             }
+
             });
         });
         });
@@ -662,25 +667,41 @@ App.prototype.onRenditionStartedRestorePos = function (event) {
     }
 };
 
+App.prototype.checkLastChapter = function (location) {
+
+    const currentIndex = location.start.index;
+    const spineItems = this.state.book.spine.items;
+  const totalChapters =  this.state.book.spine.items.length;
+
+
+   console.log('check if last chapter');
+   console.log('currentIndex', currentIndex);
+   console.log('spine-items', spineItems);
+   console.log('totalChapters-length', totalChapters)
+
+
+   const isLastChapter = currentIndex === totalChapters - 1;
+
+   if (isLastChapter) {
+     console.log("🎉 User is on the last chapter!");
+   } else {
+     console.log(`User is on chapter ${currentIndex + 1} of ${totalChapters}`);
+   }
+
+
+};
 
 
 
 
 App.prototype.onRenditionUpdateCurrentPos = function (event) {
-
-   
-
-
     this.state.book.getRange(this.makeRangeCfi(event.start.cfi, event.end.cfi)).then(range => {
         window.globalVariable = {
             epubText: range.toString(),
-            epubBodyTag:""
+            // epubBodyTag:""
         }
-        console.log("currentNextBtnString " + range.toString())
+        // console.log("currentNextBtnString " + range)
     })
-
-
-
 };
 
 
@@ -689,9 +710,9 @@ App.prototype.onFirstRenditionUpdateCurrentPos = function (event) {
     this.state.book.getRange(this.makeRangeCfi(event.start.cfi, event.end.cfi)).then(range => {
         window.globalVariable = {
             epubText: range.toString(),
-            epubBodyTag:""
+            // epubBodyTag:""
         }
-        console.log("currentFirstString clicked " + range.toString())
+        console.log("currentFirstString clicked " + range)
     })
     
 }
@@ -699,7 +720,7 @@ App.prototype.onFirstRenditionUpdateCurrentPos = function (event) {
 
 
 App.prototype.onRenditionRestoreCurrentPos = function (event, location) {
-    debugger
+    // debugger
     const nextBtn = document.querySelector('.next');
 
 
@@ -709,6 +730,8 @@ App.prototype.onRenditionRestoreCurrentPos = function (event, location) {
         if(nextBtn.classList.contains("clicked")){
                 
                 this.state.rendition.on("relocated", this.onRenditionUpdateCurrentPos.bind(this));
+                this.state.rendition.on("relocated", this.checkLastChapter.bind(this));
+
         }
         else{
             let stored = localStorage.getItem(`${this.state.book.key()}:pos`);
@@ -724,7 +747,7 @@ App.prototype.onRenditionRestoreCurrentPos = function (event, location) {
             this.state.book.getRange(this.makeRangeCfi(stored, storedend)).then(range => {
                 window.globalVariable = {
                     epubText: range.toString(),
-                    epubBodyTag:""
+                    // epubBodyTag:""
                 }
                 console.log("currentStoredString  " + range.toString())
             })
@@ -732,6 +755,7 @@ App.prototype.onRenditionRestoreCurrentPos = function (event, location) {
         } else {
 
             this.state.rendition.on("relocated", this.onFirstRenditionUpdateCurrentPos.bind(this));
+            this.state.rendition.on("relocated", this.checkLastChapter.bind(this));
 
             
         }
@@ -856,7 +880,7 @@ App.prototype.doDictionary = function (word) {
 };
 
 App.prototype.doFullscreen = () => {
-    debugger
+    // debugger
     document.fullscreenEnabled = document.fullscreenEnabled || document.mozFullScreenEnabled || document.documentElement.webkitRequestFullScreen;
 
     let requestFullscreen = element => {

@@ -2297,9 +2297,12 @@ var Path = function () {
 
 		protocol = pathString.indexOf("://");
 		if (protocol > -1) {
-			pathString = new URL(pathString).pathname;
+			try {
+				pathString = new URL(pathString).pathname;
+			} catch (e) {
+				console.error("Invalid URL:", pathString);
+			}
 		}
-
 		parsed = this.parse(pathString);
 
 		this.path = pathString;

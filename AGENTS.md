@@ -61,7 +61,7 @@ script.js
 - Search
 - Settings
 
-speech.js
+features/speech.js
 - Speech synthesis only
 - Voice selection
 - Pause / Resume
@@ -118,6 +118,17 @@ Do not directly assume access to parent application state.
 ---
 
 ## Feature Development Rules
+
+All user-facing reader feature files must live inside `features/`.
+
+Do not create new feature files in the project root. The root is reserved for:
+
+- index.html
+- style.css
+- script.js
+- vendor libraries
+- static assets
+- project documentation
 
 Before implementing a feature:
 

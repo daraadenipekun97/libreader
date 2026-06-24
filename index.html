@@ -34,6 +34,9 @@
                     <a data-tab="info" class="item">
                         <i class="icon material-icons-outlined">info</i>
                     </a>
+                    <a data-tab="highlights" class="item">
+                        <i class="icon material-icons-outlined">border_color</i>
+                    </a>
                     <a data-tab="settings" class="item">
                         <i class="icon material-icons-outlined">settings</i>
                     </a>
@@ -66,6 +69,9 @@
                         </div>
                         <div class="author"></div>
                         <div class="description"></div>
+                    </div>
+                    <div class="tab highlights hidden" data-tab="highlights">
+                        <div class="highlights-list"></div>
                     </div>
                     <div class="tab settings" data-tab="settings">
                         <div class="setting">
@@ -227,6 +233,13 @@
             <div class="error-info"></div>
             <div class="error-dump"></div>
         </div>
+        <div class="highlight-toolbar hidden">
+            <button class="highlight-color highlight-color-yellow" data-highlight-color="yellow" title="Yellow"></button>
+            <button class="highlight-color highlight-color-green" data-highlight-color="green" title="Green"></button>
+            <button class="highlight-color highlight-color-blue" data-highlight-color="blue" title="Blue"></button>
+            <button class="highlight-color highlight-color-pink" data-highlight-color="pink" title="Pink"></button>
+            <button class="highlight-color highlight-color-purple" data-highlight-color="purple" title="Purple"></button>
+        </div>
         <div class="bar">
             <div class="left">
                 <button class="open" style="display:flex; align-items: center;">
@@ -322,11 +335,12 @@
         }).install();
     </script>
 
+    <script src="features/highlights.js"></script>
     <script src="script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/easy-speech/dist/EasySpeech.iife.js"></script>
 
-    <script src="speech.js"></script>
+    <script src="features/speech.js"></script>
 
 
     <!-- <script async src="https://www.googletagmanager.com/gtag/js?id=UA-66226417-1"></script>

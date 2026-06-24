@@ -20,7 +20,7 @@ index.html
         │      ├── Themes
         │      └── Settings
         │
-        ├── speech.js
+        ├── features/speech.js
         │      ├── EasySpeech
         │      ├── Voice Selection
         │      ├── Read Aloud

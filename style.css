@@ -403,6 +403,146 @@
     background: rgba(0, 0, 0, 0.05);
 }
 
+.app .sidebar .highlights-list {
+    display: block;
+    padding: 8px;
+}
+
+.app .sidebar .highlights-empty {
+    color: #666;
+    padding: 10px 8px;
+    line-height: 1.4;
+}
+
+.app .sidebar .highlight-item {
+    display: block;
+    width: 100%;
+    margin: 0 0 8px;
+    padding: 8px;
+    color: inherit;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0px 1px 4px 0px rgba(0, 0, 0, .08);
+    cursor: pointer;
+    outline: 0;
+}
+
+.app .sidebar .highlight-item:hover,
+.app .sidebar .highlight-item:focus {
+    background: #fdfdfd;
+    border-color: #bbb;
+}
+
+.app .sidebar .highlight-meta {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.app .sidebar .highlight-swatch {
+    -webkit-flex: 0 0 auto;
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin-right: 8px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, .2);
+}
+
+.app .sidebar .highlight-date {
+    -webkit-flex: 1;
+    flex: 1;
+    color: #666;
+    font-size: 12px;
+    line-height: 1.2;
+    margin-right: 8px;
+}
+
+.app .sidebar .highlight-delete {
+    -webkit-flex: 0 0 auto;
+    flex: 0 0 auto;
+    color: #9f2a2a;
+    font-size: 12px;
+    line-height: 1.2;
+    padding: 3px 5px;
+}
+
+.app .sidebar .highlight-text {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    line-height: 1.35;
+    text-align: left;
+}
+
+.app .highlight-toolbar {
+    position: fixed;
+    z-index: 1200;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0px 2px 10px rgba(0, 0, 0, .22);
+}
+
+.app .highlight-toolbar.hidden {
+    display: none;
+}
+
+.app .highlight-color {
+    width: 28px;
+    height: 28px;
+    margin-right: 8px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, .28);
+    padding: 0;
+}
+
+.app .highlight-color:last-child {
+    margin-right: 0;
+}
+
+.app .highlight-color:hover,
+.app .highlight-color:focus {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 2px rgba(21, 101, 192, .22);
+}
+
+.app .highlight-color-yellow,
+.app .highlight-swatch-yellow {
+    background: #ffd84d;
+}
+
+.app .highlight-color-green,
+.app .highlight-swatch-green {
+    background: #73d677;
+}
+
+.app .highlight-color-blue,
+.app .highlight-swatch-blue {
+    background: #74b9ff;
+}
+
+.app .highlight-color-pink,
+.app .highlight-swatch-pink {
+    background: #ff8fbd;
+}
+
+.app .highlight-color-purple,
+.app .highlight-swatch-purple {
+    background: #b59cff;
+}
+
 .app .sidebar .search-bar {
     display: -webkit-flex;
     display: flex;

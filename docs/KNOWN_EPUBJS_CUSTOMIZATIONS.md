@@ -1,44 +1,75 @@
 # Known EPUB.js Customizations
 
-This project uses a modified epub.js build.
+This project uses a modified version of epub.js.
 
-Files:
+## Files
 
-- libs/epub.js
-- libs/epub.orig.js
+* `libs/epub.js` — Active customized version
+* `libs/epub.orig.js` — Original vendor version used for comparison
 
-Purpose:
+## Purpose
 
-The modified version contains fixes required for compatibility with certain EPUB files.
+The customized version contains compatibility fixes required for certain EPUB files that fail to load correctly with the original epub.js implementation.
 
-Known change:
+---
 
-## Modified Area
+## Customization: Path(pathString) URL Handling
 
-`Path(pathString)` URL handling.
-
-Current customization:
+### Original Code
 
 ```js
 protocol = pathString.indexOf("://");
 if (protocol > -1) {
-  try {
     pathString = new URL(pathString).pathname;
-  } catch (e) {
-    console.error("Invalid URL:", pathString);
-  }
 }
+```
 
-Original:
+### Modified Code
 
-pathString = new URL(pathString).pathname;
+```js
+protocol = pathString.indexOf("://");
+if (protocol > -1) {
+    try {
+        pathString = new URL(pathString).pathname;
+    } catch (e) {
+        console.error("Invalid URL:", pathString);
+    }
+}
+```
 
-Modified:
+### Reason for Change
 
-added a try catch block because some EPUB books failed to open when URL parsing occurred.
+Some EPUB books contain malformed or non-standard URL references that cause:
 
-Before updating epub.js:
+```js
+new URL(pathString)
+```
 
-1. Compare against epub.orig.js
-2. Preserve custom compatibility fixes
-3. Test affected EPUB books
+to throw an exception.
+
+When this occurs, the original epub.js implementation stops processing and the book fails to open.
+
+The try/catch block prevents the reader from crashing when invalid URLs are encountered and allows the EPUB loading process to continue.
+
+### Observed Behavior
+
+* Original implementation: Certain EPUB books failed to open.
+* Modified implementation: The affected books load successfully while invalid URLs are logged to the console.
+
+---
+
+## Rules for Future Updates
+
+Before modifying or replacing `libs/epub.js`:
+
+1. Compare changes against `libs/epub.orig.js`.
+2. Preserve all existing compatibility fixes.
+3. Test EPUB loading with previously affected books.
+4. Verify that valid EPUB files continue to load normally.
+5. Document any additional epub.js customizations in this file.
+
+---
+
+## Notes
+
+`libs/epub.js` should not be treated as a standard vendor dependency because it contains project-specific compatibility fixes.

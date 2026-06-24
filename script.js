@@ -33,6 +33,7 @@ window.onerror = function (msg, url, line, column, err) {
 let App = function (el) {
     this.ael = el;
     this.state = {};
+    this.highlights = null;
     this.doReset();
 
     document.body.addEventListener("keyup", this.onKeyUp.bind(this));
@@ -98,6 +99,9 @@ let App = function (el) {
         throw err;
     }
     this.applyTheme();
+    if (window.HighlightManager) {
+        this.highlights = new window.HighlightManager(this);
+    }
 };
 
 
@@ -211,6 +215,7 @@ App.prototype.doBook = function (url, opts) {
     this.state.rendition.on("relocated", this.onRenditionRelocatedSavePos.bind(this));
     this.state.rendition.on("started", this.onRenditionStartedRestorePos.bind(this));
     this.state.rendition.on("displayError", this.fatal.bind(this, "error rendering book"));
+    if (this.highlights) this.highlights.attach(this.state.book, this.state.rendition);
 
     this.state.rendition.display();
 
@@ -309,7 +314,14 @@ App.prototype.doReset = function () {
     if (this.state.book) this.state.book.destroy();
     this.state = {
         book: null,
-        rendition: null
+        rendition: null,
+        pageTurnSelectionGuard: {
+            mouseDown: false,
+            startX: 0,
+            startY: 0,
+            moved: false,
+            suppressClick: false
+        }
     };
     this.qs(".sidebar-wrapper").classList.add("out");
     this.qs(".bar .book-title").innerHTML = "";
@@ -318,6 +330,8 @@ App.prototype.doReset = function () {
     this.qs(".search-results").innerHTML = "";
     this.qs(".search-box").value = "";
     this.qs(".toc-list").innerHTML = "";
+    this.qs(".highlights-list").innerHTML = "";
+    if (this.highlights) this.highlights.detach();
     this.qs(".info .cover").src = "";
     this.qs(".info .title").innerHTML = "";
     this.qs(".info .series-info").classList.remove("hidden");
@@ -453,11 +467,11 @@ App.prototype.onKeyUp = function (event) {
 };
 
 App.prototype.onRenditionClick = function (event) {
+    if (this.shouldSkipPageTurnForSelection()) return;
+
     try {
         if (event.target.tagName.toLowerCase() == "a" && event.target.href) return;
-        if (event.target.parentNoprevde.tagName.toLowerCase() == "a" && event.target.parentNode.href) return;
-        if (window.getSelection().toString().length !== 0) return;
-        if (this.state.rendition.manager.getContents()[0].window.getSelection().toString().length !== 0) return;
+        if (event.target.parentNode && event.target.parentNode.tagName.toLowerCase() == "a" && event.target.parentNode.href) return;
     } catch (err) {}
 
     let wrapper = this.state.rendition.manager.container;
@@ -482,10 +496,98 @@ App.prototype.onRenditionClick = function (event) {
     }
 };
 
+App.prototype.shouldSkipPageTurnForSelection = function () {
+    try {
+        let guard = this.state.pageTurnSelectionGuard;
+        if (guard && guard.suppressClick) {
+            guard.suppressClick = false;
+            return true;
+        }
+    } catch (err) {}
+
+    return this.hasActiveTextSelection();
+};
+
+App.prototype.hasActiveTextSelection = function () {
+    try {
+        if (window.getSelection && window.getSelection().toString().trim().length !== 0) return true;
+    } catch (err) {}
+
+    try {
+        if (!this.state.rendition || !this.state.rendition.manager) return false;
+        return this.state.rendition.manager.getContents().some(contents => {
+            try {
+                return contents.window.getSelection().toString().trim().length !== 0;
+            } catch (err) {
+                return false;
+            }
+        });
+    } catch (err) {
+        return false;
+    }
+};
+
+App.prototype.attachPageTurnSelectionGuard = function (contents) {
+    if (!contents || !contents.document) return;
+    const doc = contents.document;
+    if (doc._mylibriPageTurnSelectionGuardAttached) return;
+    doc._mylibriPageTurnSelectionGuardAttached = true;
+
+    const moveThreshold = 4;
+    const getPoint = event => {
+        return {
+            x: event.clientX || 0,
+            y: event.clientY || 0
+        };
+    };
+
+    doc.addEventListener("mousedown", event => {
+        const point = getPoint(event);
+        const guard = this.state.pageTurnSelectionGuard;
+        guard.mouseDown = true;
+        guard.startX = point.x;
+        guard.startY = point.y;
+        guard.moved = false;
+    }, false);
+
+    doc.addEventListener("mousemove", event => {
+        const guard = this.state.pageTurnSelectionGuard;
+        if (!guard.mouseDown) return;
+        const point = getPoint(event);
+        if (Math.abs(point.x - guard.startX) > moveThreshold || Math.abs(point.y - guard.startY) > moveThreshold) {
+            guard.moved = true;
+        }
+    }, false);
+
+    doc.addEventListener("mouseup", event => {
+        const guard = this.state.pageTurnSelectionGuard;
+        if (!guard.mouseDown) return;
+        guard.mouseDown = false;
+
+        const point = getPoint(event);
+        const moved = guard.moved ||
+            Math.abs(point.x - guard.startX) > moveThreshold ||
+            Math.abs(point.y - guard.startY) > moveThreshold;
+
+        if (moved || this.hasContentsTextSelection(contents)) {
+            guard.suppressClick = true;
+        }
+    }, false);
+};
+
+App.prototype.hasContentsTextSelection = function (contents) {
+    try {
+        return contents.window.getSelection().toString().trim().length !== 0;
+    } catch (err) {
+        return false;
+    }
+};
+
 App.prototype.onRenditionDisplayedTouchSwipe = function (event) {
     let start = null
     let end = null;
     const el = event.document.documentElement;
+    this.attachPageTurnSelectionGuard(event);
 
     el.addEventListener('touchstart', event => {
         start = event.changedTouches[0];

@@ -7,6 +7,8 @@ This document maps the current MyLibriBooks EPUB Reader implementation.
 - `index.html`: static UI structure, settings controls, reader shell, script loading.
 - `style.css`: application, sidebar, reader, settings, dictionary, and mobile styling.
 - `script.js`: main reader application logic through the global `App` constructor.
+- `features/highlights.js`: highlight creation, highlight storage, annotation restore, and highlight list behavior.
+- `features/reading-history.js`: local reading-history tracking, certified pages-read calculation, and future API sync queueing.
 - `features/speech.js`: Text-to-Speech setup and EasySpeech integration.
 - `libs/epub.js`: customized epub.js build used for EPUB parsing, rendering, CFI, locations, and spine access.
 - `libs/epub.orig.js`: original epub.js reference build.
@@ -22,9 +24,11 @@ This document maps the current MyLibriBooks EPUB Reader implementation.
 3. `jszip`.
 4. Customized `libs/epub.js`.
 5. Raven/Sentry.
-6. `script.js`.
-7. EasySpeech from CDN.
-8. `features/speech.js`.
+6. `features/highlights.js`.
+7. `features/reading-history.js`.
+8. `script.js`.
+9. EasySpeech from CDN.
+10. `features/speech.js`.
 
 `script.js` creates the global `ePubViewer` immediately after loading. `features/speech.js` initializes on `document.body.onload`.
 
@@ -34,6 +38,7 @@ This document maps the current MyLibriBooks EPUB Reader implementation.
 - `ePubViewer`: global instance of `App`, created from `document.querySelector(".app")`.
 - `window.globalVariable`: object used to expose the current page or spine text to `features/speech.js`; currently shaped as `{ epubText }`.
 - `window.globalVariableTag`: object used by `features/speech.js` for speech boundary highlighting; currently shaped as `{ epubBodyTag }`.
+- `window.readerContext`: parsed iframe URL context shaped as `{ bookUrl, bookId, genre, hideOpenButton }`.
 - `disableRaven` / `window.disableRaven`: optional flags checked before sending Raven errors.
 - `EasySpeech`: global provided by the CDN EasySpeech IIFE script.
 - `ePub`: global provided by `libs/epub.js`.
@@ -120,6 +125,18 @@ Important fields:
 
 - `checkDictionary()`: polls selected text inside the epub.js content iframe and schedules a dictionary lookup.
 - `doDictionary(word)`: shows/hides dictionary UI and fetches definitions from `https://dict.api.pgaskin.net/word/...`.
+
+## Major Functions in `features/reading-history.js`
+
+- `ReadingHistoryManager(app)`: owns reading session state and reading-history lifecycle.
+- `attach(book, rendition)`: attaches the manager to the current book/rendition when valid `readerContext` exists.
+- `setMetadata(metadata)`: receives EPUB title and author from `onBookMetadataLoaded`.
+- `onRelocated(location)`: finalizes the previous visible location and starts certification for the new location.
+- `finalizeCurrentView()`: certifies a location as read when visible time and word-count rules pass.
+- `getVisibleText(location)`: extracts visible text using the current start/end CFI range.
+- `payload()`: builds the reading-history payload.
+- `ReadingHistoryStorage`: persists session and unsynced queue records in localStorage.
+- `ReadingHistorySync`: POST sync boundary for a future configured API URL.
 
 ## Major Functions in `features/speech.js`
 
@@ -275,6 +292,8 @@ Current direct iframe integration points:
 - No active `message` event listener is present.
 - The back button uses `window.history.back()` instead of parent-state access.
 - The book URL can be provided through `location.search` or `location.hash`.
+- `getReaderContext()` parses `bookUrl`, `bookId`, `genre`, and `hideOpenButton` from the iframe URL and stores them on `window.readerContext`.
+- `bookId` and `genre` are used for reading history and are not appended to the EPUB fetch URL.
 - If the URL/hash starts with `!`, the open/back button is hidden.
 
 Future parent communication should use `window.parent.postMessage()` and should not assume direct access to parent application state.
@@ -297,6 +316,8 @@ Book-specific data:
 - `${book.key()}:locations-${chars}`: serialized epub.js locations, with `chars` currently `1650`.
 - `${book.key()}:pos`: saved start CFI.
 - `${book.key()}:posend`: saved end CFI.
+- `ePubViewer:${bookId}:reading-history:session`: local reading-history session cache.
+- `ePubViewer:${bookId}:reading-history:queue`: unsynced reading-history payload queue.
 
 Reset:
 
@@ -399,6 +420,7 @@ All reader features must live inside the `features/` folder.
 Examples:
 
 - `features/highlights.js`
+- `features/reading-history.js`
 - `features/speech.js`
 - `features/analytics.js`
 - `features/leaderboard.js`

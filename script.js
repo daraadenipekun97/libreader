@@ -34,6 +34,7 @@ let App = function (el) {
     this.ael = el;
     this.state = {};
     this.highlights = null;
+    this.readingHistory = null;
     this.doReset();
 
     document.body.addEventListener("keyup", this.onKeyUp.bind(this));
@@ -101,6 +102,9 @@ let App = function (el) {
     this.applyTheme();
     if (window.HighlightManager) {
         this.highlights = new window.HighlightManager(this);
+    }
+    if (window.ReadingHistoryManager) {
+        this.readingHistory = new window.ReadingHistoryManager(this);
     }
 };
 
@@ -216,6 +220,7 @@ App.prototype.doBook = function (url, opts) {
     this.state.rendition.on("started", this.onRenditionStartedRestorePos.bind(this));
     this.state.rendition.on("displayError", this.fatal.bind(this, "error rendering book"));
     if (this.highlights) this.highlights.attach(this.state.book, this.state.rendition);
+    if (this.readingHistory) this.readingHistory.attach(this.state.book, this.state.rendition);
 
     this.state.rendition.display();
 
@@ -332,6 +337,7 @@ App.prototype.doReset = function () {
     this.qs(".toc-list").innerHTML = "";
     this.qs(".highlights-list").innerHTML = "";
     if (this.highlights) this.highlights.detach();
+    if (this.readingHistory) this.readingHistory.detach();
     this.qs(".info .cover").src = "";
     this.qs(".info .title").innerHTML = "";
     this.qs(".info .series-info").classList.remove("hidden");
@@ -436,6 +442,7 @@ App.prototype.onBookMetadataLoaded = function (metadata) {
     this.qs(".info .series-index").innerText = metadata.seriesIndex.trim();
     this.qs(".info .description").innerText = metadata.description;
     if (sanitizeHtml) this.qs(".info .description").innerHTML = sanitizeHtml(metadata.description);
+    if (this.readingHistory) this.readingHistory.setMetadata(metadata);
 };
 
 App.prototype.onBookCoverLoaded = function (url) {
@@ -1060,11 +1067,36 @@ App.prototype.doSidebar = function () {
 
 let ePubViewer = null;
 
+function getReaderContext() {
+    const raw = location.search
+        ? location.search.replace("?", "")
+        : location.hash.replace("#", "");
+
+    const hideOpenButton = raw.startsWith("!");
+    const cleanRaw = hideOpenButton ? raw.slice(1) : raw;
+    const parts = cleanRaw.split("&").filter(Boolean);
+    const bookUrlParam = getReaderContextParam(parts, "bookUrl");
+
+    return {
+        bookUrl: decodeURIComponent(bookUrlParam || parts[0] || ""),
+        bookId: getReaderContextParam(parts, "bookId"),
+        genre: getReaderContextParam(parts, "genre"),
+        hideOpenButton: hideOpenButton
+    };
+}
+
+function getReaderContextParam(parts, name) {
+    const prefix = name + "=";
+    const part = parts.find(p => p.startsWith(prefix));
+    if (!part) return undefined;
+    return decodeURIComponent(part.slice(prefix.length));
+}
+
 try {
+    window.readerContext = getReaderContext();
     ePubViewer = new App(document.querySelector(".app"));
-    let ufn = location.search.replace("?", "") || location.hash.replace("#", "");
-    if (ufn.startsWith("!")) {
-        ufn = ufn.replace("!", "");
+    let ufn = window.readerContext.bookUrl;
+    if (window.readerContext.hideOpenButton) {
         document.querySelector(".app button.open").style = "display: none !important";
     }
     if (ufn) {

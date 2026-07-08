@@ -7,7 +7,6 @@
   const SYNC_INTERVAL_SECONDS = 300;
   const SYNC_INTERVAL_MS = SYNC_INTERVAL_SECONDS * 1000;
   const COMPLETION_THRESHOLD = 85;
-  const API_URL = "https://beta.mylibribooks.com/api/user/reader/reading-history";
 
   function ReadingHistoryManager(app) {
     this.app = app;
@@ -52,6 +51,7 @@
     this.session.bookId = this.context.bookId;
     this.session.genre = this.context.genre;
     this.session.sessions = this.session.sessions || 1;
+    this.session.pageContent = this.formatPageContent(this.session.pageContent);
     this.session.highestPageRead = Math.max(
       Number(this.session.highestPageRead) || 0,
       this.highestCertifiedPage(this.session.certifiedLocations)
@@ -101,6 +101,7 @@
       genre: this.context.genre,
       pagesRead: 0,
       highestPageRead: 0,
+      pageContent: "",
       startedAt: now,
       finishedAt: now,
       minutesRead: 0,
@@ -124,7 +125,15 @@
   };
 
   ReadingHistoryManager.prototype.onActivity = function () {
-    this.lastInteractionAt = Date.now();
+    if (document.visibilityState !== "visible") return;
+
+    const now = Date.now();
+    if (this.currentView) {
+      this.updateViewActiveTime(this.currentView, now);
+      this.currentView.lastActivityAtMs = now;
+      this.currentView.trackingActive = true;
+    }
+    this.lastInteractionAt = now;
   };
 
   ReadingHistoryManager.prototype.onDisplayed = function (view) {
@@ -134,12 +143,15 @@
 
   ReadingHistoryManager.prototype.onVisibilityChange = function () {
     if (document.visibilityState === "hidden") {
+      if (this.currentView) {
+        this.updateViewActiveTime(this.currentView, Date.now());
+        this.currentView.trackingActive = false;
+      }
       this.checkpointCurrentView({ allowHidden: true });
       this.queueSync("hidden", { keepalive: true });
       this.save();
     } else {
       this.onActivity();
-      if (this.currentView) this.currentView.startedAtMs = Date.now();
       this.sync.retry();
     }
   };
@@ -228,17 +240,24 @@
       return;
     }
 
+    const now = Date.now();
     this.currentView = {
       id: locationId,
       location: location,
-      startedAtMs: Date.now(),
+      startedAtMs: now,
+      activeReadingMs: 0,
+      lastAccountedAtMs: now,
+      lastActivityAtMs: this.lastInteractionAt || now,
+      trackingActive: document.visibilityState === "visible",
       wordCount: 0,
+      pageContent: "",
       finalAnchor: this.isFinalAnchor(location)
     };
 
     this.getVisibleText(location).then(text => {
       if (!this.currentView || this.currentView.id !== locationId) return;
       this.currentView.wordCount = this.countWords(text);
+      this.currentView.pageContent = this.formatPageContent(text);
     }).catch(err => {
       console.warn("reading history visible text error", err);
     });
@@ -266,22 +285,41 @@
     if (!this.session || !view) return false;
     options = options || {};
 
-    if (!this.isActiveReadingView(view, options)) return;
+    this.updateViewActiveTime(view, Date.now());
     if (!view.wordCount) return;
     if (this.isCertified(view.id)) return;
 
-    const elapsedSeconds = Math.max(0, (Date.now() - view.startedAtMs) / 1000);
-    const minSeconds = (view.wordCount / MAX_READING_WPM) * 60;
-    const maxSeconds = (view.wordCount / MIN_READING_WPM) * 60;
+    const activeReadingSeconds = Math.max(0, view.activeReadingMs / 1000);
+    const minimumAllowedReadingSeconds = (view.wordCount / MAX_READING_WPM) * 60;
+    const maximumAllowedReadingSeconds = (view.wordCount / MIN_READING_WPM) * 60;
 
-    if (elapsedSeconds < minSeconds) return;
+    if (activeReadingSeconds < minimumAllowedReadingSeconds) return;
+
+    const pageLocationNumber = this.locationNumber(view.location) || view.id;
+    const secondsAddedToVerifiedReading = Math.min(
+      activeReadingSeconds,
+      maximumAllowedReadingSeconds
+    );
 
     this.session.certifiedLocations.push(view.id);
-    this.session.verifiedReadingSeconds += Math.min(elapsedSeconds, maxSeconds);
+    this.session.verifiedReadingSeconds += secondsAddedToVerifiedReading;
+    this.session.pageContent = view.pageContent;
     this.session.highestPageRead = Math.max(
       this.session.highestPageRead || 0,
       this.locationNumber(view.location)
     );
+
+    console.debug("Reading history page certified", {
+      pageLocationNumber: pageLocationNumber,
+      pageContent: view.pageContent,
+      wordCount: view.wordCount,
+      dwellSeconds: roundDebugSeconds(activeReadingSeconds),
+      minAllowedSeconds: roundDebugSeconds(minimumAllowedReadingSeconds),
+      maxAllowedSeconds: roundDebugSeconds(maximumAllowedReadingSeconds),
+      secondsAddedToVerifiedReading: roundDebugSeconds(secondsAddedToVerifiedReading),
+      totalVerifiedReadingSecondsAfterAdd: roundDebugSeconds(this.session.verifiedReadingSeconds)
+    });
+
     if (view.finalAnchor) this.session.finalAnchorCertified = true;
     this.updatePayloadFields();
     this.save();
@@ -291,13 +329,21 @@
 
   ReadingHistoryManager.prototype.isActiveReadingNow = function () {
     if (document.visibilityState !== "visible") return false;
-    return this.lastInteractionAt === 0 || Date.now() - this.lastInteractionAt <= ACTIVE_WINDOW_MS;
+    return this.lastInteractionAt > 0 && Date.now() - this.lastInteractionAt <= ACTIVE_WINDOW_MS;
   };
 
-  ReadingHistoryManager.prototype.isActiveReadingView = function (view, options) {
-    options = options || {};
-    if (!options.allowHidden && document.visibilityState !== "visible") return false;
-    return this.lastInteractionAt === 0 || this.lastInteractionAt >= view.startedAtMs || Date.now() - this.lastInteractionAt <= ACTIVE_WINDOW_MS;
+  ReadingHistoryManager.prototype.updateViewActiveTime = function (view, now) {
+    if (!view) return;
+    now = now || Date.now();
+
+    const lastAccountedAtMs = view.lastAccountedAtMs || view.startedAtMs || now;
+    if (view.trackingActive && view.lastActivityAtMs) {
+      const activeUntilMs = Math.min(now, view.lastActivityAtMs + ACTIVE_WINDOW_MS);
+      if (activeUntilMs > lastAccountedAtMs) {
+        view.activeReadingMs = (view.activeReadingMs || 0) + activeUntilMs - lastAccountedAtMs;
+      }
+    }
+    view.lastAccountedAtMs = now;
   };
 
   ReadingHistoryManager.prototype.isCertified = function (locationId) {
@@ -398,6 +444,11 @@
     return text.trim().replace(/\s+/g, " ").split(" ").filter(Boolean).length;
   };
 
+  ReadingHistoryManager.prototype.formatPageContent = function (text) {
+    if (!text) return "";
+    return text.trim().replace(/\s+/g, " ").slice(0, 20);
+  };
+
   ReadingHistoryManager.prototype.payload = function () {
     if (!this.session) return null;
     return {
@@ -428,7 +479,7 @@
     const payload = this.payload();
     this.lastQueuedVerifiedSeconds = this.session.verifiedReadingSeconds;
     this.session.lastQueuedVerifiedSeconds = this.lastQueuedVerifiedSeconds;
-    this.storage.enqueue(this.session.bookId, payload, reason);
+    this.storage.enqueue(this.session.bookId, payload, reason, this.session.pageContent);
     this.save();
     this.sync.retry({ keepalive: !!options.keepalive });
   };
@@ -475,12 +526,13 @@
     localStorage.setItem(this.sessionKey(bookId), JSON.stringify(session));
   };
 
-  ReadingHistoryStorage.prototype.enqueue = function (bookId, payload, reason) {
+  ReadingHistoryStorage.prototype.enqueue = function (bookId, payload, reason, pageContent) {
     const queue = this.loadQueue(bookId);
     queue.push({
       id: "reading-history-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
       synced: false,
       payload: payload,
+      pageContent: pageContent || "",
       reason: reason || "sync",
       queuedAt: new Date().toISOString()
     });
@@ -493,6 +545,7 @@
       const queue = raw ? JSON.parse(raw) : [];
       return Array.isArray(queue) ? queue.map(item => {
         if (!item.id) item.id = "reading-history-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+        if (typeof item.pageContent !== "string") item.pageContent = "";
         return item;
       }) : [];
     } catch (err) {
@@ -506,13 +559,15 @@
 
   function ReadingHistorySync(storage) {
     this.storage = storage;
-    this.apiUrl = API_URL;
     this.inFlight = false;
+    this.retry = this.retry.bind(this);
+    window.addEventListener("reader-authenticated", this.retry, false);
   }
 
   ReadingHistorySync.prototype.retry = function (options) {
     options = options || {};
-    if (!this.apiUrl || this.inFlight || !(window.readerContext && window.readerContext.bookId)) return;
+    if (this.inFlight || !(window.readerContext && window.readerContext.bookId)) return;
+    if (window.readerAuth && window.readerAuth.isSessionExpired()) return;
     const bookId = window.readerContext.bookId;
     const queue = this.storage.loadQueue(bookId);
     const pending = queue.filter(item => !item.synced);
@@ -530,22 +585,56 @@
   };
 
   ReadingHistorySync.prototype.post = function (payload, options) {
-    options = options || {};
-    return fetch(this.apiUrl, {
-      method: "POST",
-      keepalive: !!options.keepalive,
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    }).then(resp => {
-      if (!resp.ok) throw new Error("reading history sync failed");
-      return resp;
-    });
+    return saveReadingSession(payload, options);
   };
+
+  function saveReadingSession(payload, options) {
+    options = options || {};
+
+    if (!window.readerFetch || !window.readerAuth) {
+      return Promise.reject(new Error("Reader authentication is not available."));
+    }
+    if (window.readerAuth.isSessionExpired()) {
+      return Promise.reject(new Error("Reading analytics stopped because the session expired."));
+    }
+
+    function send() {
+      return window.readerFetch("/api/user/reading/sessions", {
+        method: "POST",
+        keepalive: !!options.keepalive,
+        body: JSON.stringify(payload)
+      }).then(response => response.text().then(text => {
+        let data = null;
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (err) {
+            throw new Error("The reading session endpoint returned invalid JSON.");
+          }
+        }
+        if (!response.ok) {
+          throw new Error(data && data.message || "Unable to save the reading session.");
+        }
+        return data;
+      }));
+    }
+
+    const request = window.readerAuth.isAuthenticated()
+      ? send()
+      : window.readerAuth.whenVerified().then(send);
+
+    return request.catch(err => {
+      console.error("Reading session save failed:", err.message || err);
+      throw err;
+    });
+  }
 
   function safeTrim(value) {
     return value ? String(value).trim() : "";
+  }
+
+  function roundDebugSeconds(value) {
+    return Math.round(value * 100) / 100;
   }
 
   window.ReadingHistoryManager = ReadingHistoryManager;

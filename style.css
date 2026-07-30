@@ -472,6 +472,20 @@
     padding: 3px 5px;
 }
 
+.app .sidebar .highlight-palette {
+    -webkit-flex: 0 0 auto;
+    flex: 0 0 auto;
+    display: -webkit-flex;
+    display: flex;
+    margin-right: 6px;
+}
+
+.app .sidebar .highlight-palette .highlight-color {
+    width: 16px;
+    height: 16px;
+    margin-right: 4px;
+}
+
 .app .sidebar .highlight-text {
     display: -webkit-box;
     overflow: hidden;

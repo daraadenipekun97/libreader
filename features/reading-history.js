@@ -4,8 +4,8 @@
   const MIN_READING_WPM = 100;
   const MAX_READING_WPM = 500;
   const ACTIVE_WINDOW_MS = 120000;
-  const SYNC_INTERVAL_SECONDS = 300;
-  const SYNC_INTERVAL_MS = SYNC_INTERVAL_SECONDS * 1000;
+  const FALLBACK_SYNC_INTERVAL_SECONDS = 300;
+  const FALLBACK_SYNC_INTERVAL_MS = FALLBACK_SYNC_INTERVAL_SECONDS * 1000;
   const COMPLETION_THRESHOLD = 85;
 
   function ReadingHistoryManager(app) {
@@ -14,12 +14,18 @@
     this.rendition = null;
     this.context = window.readerContext || {};
     this.storage = new ReadingHistoryStorage();
-    this.sync = new ReadingHistorySync(this.storage);
+    this.sync = new ReadingHistorySync(this.storage, this);
     this.session = null;
     this.currentView = null;
     this.lastInteractionAt = 0;
     this.lastSyncVerifiedSeconds = 0;
     this.lastQueuedVerifiedSeconds = 0;
+    this.progressVersion = 0;
+    this.lastSyncedProgressVersion = 0;
+    this.lastSuccessfulPayloadHash = "";
+    this.transitionQueue = Promise.resolve();
+    this.visitedLocationKeys = {};
+    this.rejectedLocationKeys = {};
     this.boundContents = [];
     this.syncTimer = null;
     this.backButton = null;
@@ -58,6 +64,9 @@
     );
     this.lastQueuedVerifiedSeconds = this.session.lastQueuedVerifiedSeconds || 0;
     this.lastSyncVerifiedSeconds = this.session.lastSyncedVerifiedSeconds || 0;
+    this.progressVersion = Number(this.session.progressVersion) || 0;
+    this.lastSyncedProgressVersion = Number(this.session.lastSyncedProgressVersion) || 0;
+    this.lastSuccessfulPayloadHash = this.session.lastSuccessfulPayloadHash || "";
     this.save();
 
     rendition.on("relocated", this.onRelocated);
@@ -69,8 +78,8 @@
 
   ReadingHistoryManager.prototype.detach = function () {
     if (this.session) {
-      this.checkpointCurrentView({ allowHidden: true });
-      this.queueSync("detach", { keepalive: true });
+      this.pauseCurrentView();
+      this.sync.retry({ keepalive: true, trigger: "detach" });
       this.save();
     }
     this.stopSyncTimer();
@@ -144,11 +153,9 @@
   ReadingHistoryManager.prototype.onVisibilityChange = function () {
     if (document.visibilityState === "hidden") {
       if (this.currentView) {
-        this.updateViewActiveTime(this.currentView, Date.now());
-        this.currentView.trackingActive = false;
+        this.pauseCurrentView();
       }
-      this.checkpointCurrentView({ allowHidden: true });
-      this.queueSync("hidden", { keepalive: true });
+      this.sync.retry({ keepalive: true, trigger: "hidden" });
       this.save();
     } else {
       this.onActivity();
@@ -157,28 +164,31 @@
   };
 
   ReadingHistoryManager.prototype.onBeforeUnload = function () {
-    this.checkpointCurrentView({ allowHidden: true });
-    this.queueSync("beforeunload", { keepalive: true });
+    this.pauseCurrentView();
+    this.sync.retry({ keepalive: true, trigger: "beforeunload" });
     this.save();
   };
 
   ReadingHistoryManager.prototype.onBackToBook = function () {
-    this.checkpointCurrentView({ allowHidden: true });
-    this.queueSync("back", { keepalive: true });
+    this.pauseCurrentView();
+    this.sync.retry({ keepalive: true, trigger: "back" });
     this.save();
   };
 
   ReadingHistoryManager.prototype.onRelocated = function (location) {
     if (!this.session) return;
-    this.finalizeCurrentView();
-    this.onActivity();
-    this.startView(location);
-    this.syncIfDue();
+    this.transitionQueue = this.transitionQueue.then(() => {
+      if (!this.session) return null;
+      return this.transitionToLocation(location);
+    }).catch(err => {
+      console.warn("reading history relocation error", err);
+      if (this.session) this.startView(location);
+    });
   };
 
   ReadingHistoryManager.prototype.startSyncTimer = function () {
     this.stopSyncTimer();
-    this.syncTimer = window.setInterval(this.onPeriodicSync, SYNC_INTERVAL_MS);
+    this.syncTimer = window.setInterval(this.onPeriodicSync, FALLBACK_SYNC_INTERVAL_MS);
   };
 
   ReadingHistoryManager.prototype.stopSyncTimer = function () {
@@ -189,12 +199,12 @@
 
   ReadingHistoryManager.prototype.onPeriodicSync = function () {
     if (!this.session || !this.isActiveReadingNow()) {
-      this.sync.retry();
+      this.sync.retry({ trigger: "fallback-interval" });
       return;
     }
 
-    this.checkpointCurrentView();
-    this.queueSync("interval");
+    this.logSyncSkipped("no progress change");
+    this.sync.retry({ trigger: "fallback-interval" });
   };
 
   ReadingHistoryManager.prototype.attachBackButton = function () {
@@ -241,7 +251,11 @@
     }
 
     const now = Date.now();
-    this.currentView = {
+    const pageNumber = this.locationNumber(location);
+    const wasVisited = !!this.visitedLocationKeys[locationId];
+    const previousRejection = this.rejectedLocationKeys[locationId] || null;
+    const alreadyCertified = this.isCertified(locationId);
+    const view = {
       id: locationId,
       location: location,
       startedAtMs: now,
@@ -251,55 +265,118 @@
       trackingActive: document.visibilityState === "visible",
       wordCount: 0,
       pageContent: "",
+      minimumAllowedReadingSeconds: 0,
+      maximumAllowedReadingSeconds: 0,
+      wasVisited: wasVisited,
+      previousRejection: previousRejection,
+      alreadyCertifiedOnEntry: alreadyCertified,
       finalAnchor: this.isFinalAnchor(location)
     };
+    this.visitedLocationKeys[locationId] = true;
+    this.currentView = view;
 
-    this.getVisibleText(location).then(text => {
-      if (!this.currentView || this.currentView.id !== locationId) return;
-      this.currentView.wordCount = this.countWords(text);
-      this.currentView.pageContent = this.formatPageContent(text);
+    view.textReady = this.getVisibleText(location).then(text => {
+      view.wordCount = this.countWords(text);
+      view.pageContent = this.formatPageContent(text);
+      view.minimumAllowedReadingSeconds = this.minimumAllowedSeconds(view.wordCount);
+      view.maximumAllowedReadingSeconds = this.maximumAllowedSeconds(view.wordCount);
+      this.logReadingHistory("PAGE_ENTERED", {
+        timestamp: new Date().toISOString(),
+        locationKey: locationId,
+        pageNumber: pageNumber,
+        cfi: location.start && location.start.cfi,
+        navigationDirection: this.navigationDirection(pageNumber),
+        wasVisited: wasVisited,
+        previouslyFailed: !!previousRejection,
+        previousRejectionReason: previousRejection && previousRejection.reason || "",
+        alreadyCertified: alreadyCertified,
+        newTimerStarted: true,
+        highestPageRead: this.session && this.session.highestPageRead || 0,
+        pagesRead: this.session && this.session.pagesRead || 0,
+        wordCount: view.wordCount,
+        minimumAllowedSeconds: roundDebugSeconds(view.minimumAllowedReadingSeconds),
+        maximumAllowedSeconds: roundDebugSeconds(view.maximumAllowedReadingSeconds),
+        pageContent: view.pageContent
+      });
     }).catch(err => {
       console.warn("reading history visible text error", err);
     });
   };
 
-  ReadingHistoryManager.prototype.finalizeCurrentView = function () {
-    if (!this.session || !this.currentView) return;
-
-    const view = this.currentView;
+  ReadingHistoryManager.prototype.transitionToLocation = function (location) {
+    const previousView = this.currentView;
+    const nextLocationKey = this.locationId(location);
     this.currentView = null;
-    this.certifyView(view);
+
+    return this.finalizeView(previousView, nextLocationKey).then(result => {
+      this.onActivity();
+      this.startView(location);
+      if (result && result.certified) {
+        this.queueSync("qualifying-page-turn", {
+          trigger: "qualifying-page-turn",
+          pageWasNewlyCertified: true
+        });
+      } else if (previousView && result && result.reason) {
+        this.logSyncDecision({
+          pageWasNewlyCertified: false,
+          finalSyncDecision: false,
+          skipReason: "page failed validation"
+        });
+        this.logSyncSkipped("page failed validation");
+      }
+    });
   };
 
-  ReadingHistoryManager.prototype.checkpointCurrentView = function (options) {
-    if (!this.session || !this.currentView) return false;
-    const certified = this.certifyView(this.currentView, options);
-    if (certified) {
-      this.currentView = null;
-      return true;
-    }
-    return false;
+  ReadingHistoryManager.prototype.finalizeView = function (view, nextLocationKey) {
+    if (!this.session || !view) return Promise.resolve({ certified: false, reason: "no previous page" });
+
+    return Promise.resolve(view.textReady).then(() => {
+      this.updateViewActiveTime(view, Date.now());
+      view.trackingActive = false;
+      this.logReadingHistory("PAGE_FINALIZING", {
+        previousLocationKey: view.id,
+        pageNumber: this.locationNumber(view.location),
+        nextLocationKey: nextLocationKey || "",
+        activeDwellSeconds: roundDebugSeconds(Math.max(0, view.activeReadingMs / 1000)),
+        wallClockDwellSeconds: roundDebugSeconds(Math.max(0, (Date.now() - view.startedAtMs) / 1000)),
+        minimumAllowedSeconds: roundDebugSeconds(this.minimumAllowedSeconds(view.wordCount)),
+        maximumAllowedSeconds: roundDebugSeconds(this.maximumAllowedSeconds(view.wordCount)),
+        previousRejectionStatus: view.previousRejection || this.rejectedLocationKeys[view.id] || null,
+        certifiedStatusBeforeEvaluation: this.isCertified(view.id),
+        visibilityState: document.visibilityState,
+        readerActivityState: this.isActiveReadingNow() ? "active" : "inactive"
+      });
+      return this.certifyView(view);
+    });
   };
 
   ReadingHistoryManager.prototype.certifyView = function (view, options) {
-    if (!this.session || !view) return false;
+    if (!this.session || !view) return { certified: false, reason: "missing session or page" };
     options = options || {};
 
     this.updateViewActiveTime(view, Date.now());
-    if (!view.wordCount) return;
-    if (this.isCertified(view.id)) return;
+    if (!view.wordCount) return this.rejectView(view, "missing visible text");
+    if (this.isCertified(view.id)) return this.rejectView(view, "duplicate page/location");
 
     const activeReadingSeconds = Math.max(0, view.activeReadingMs / 1000);
-    const minimumAllowedReadingSeconds = (view.wordCount / MAX_READING_WPM) * 60;
-    const maximumAllowedReadingSeconds = (view.wordCount / MIN_READING_WPM) * 60;
+    const minimumAllowedReadingSeconds = this.minimumAllowedSeconds(view.wordCount);
+    const maximumAllowedReadingSeconds = this.maximumAllowedSeconds(view.wordCount);
 
-    if (activeReadingSeconds < minimumAllowedReadingSeconds) return;
+    if (activeReadingSeconds < minimumAllowedReadingSeconds) {
+      return this.rejectView(view, "below minimum reading time");
+    }
 
     const pageLocationNumber = this.locationNumber(view.location) || view.id;
     const secondsAddedToVerifiedReading = Math.min(
       activeReadingSeconds,
       maximumAllowedReadingSeconds
     );
+    const pagesReadBefore = this.session.pagesRead || 0;
+    const highestPageReadBefore = this.session.highestPageRead || 0;
+    const verifiedReadingSecondsBefore = this.session.verifiedReadingSeconds || 0;
+    const completionPercentageBefore = this.session.completionPercentage || 0;
+    const progressVersionBefore = this.progressVersion;
+    const wasRevisitedAfterFailure = !!(view.previousRejection || this.rejectedLocationKeys[view.id]);
 
     this.session.certifiedLocations.push(view.id);
     this.session.verifiedReadingSeconds += secondsAddedToVerifiedReading;
@@ -309,22 +386,81 @@
       this.locationNumber(view.location)
     );
 
-    console.debug("Reading history page certified", {
+    if (view.finalAnchor) this.session.finalAnchorCertified = true;
+    this.bumpProgressVersion();
+    this.updatePayloadFields();
+    this.save();
+    delete this.rejectedLocationKeys[view.id];
+    this.logReadingHistory("PAGE_CERTIFIED", {
+      locationKey: view.id,
       pageLocationNumber: pageLocationNumber,
       pageContent: view.pageContent,
       wordCount: view.wordCount,
       dwellSeconds: roundDebugSeconds(activeReadingSeconds),
-      minAllowedSeconds: roundDebugSeconds(minimumAllowedReadingSeconds),
-      maxAllowedSeconds: roundDebugSeconds(maximumAllowedReadingSeconds),
-      secondsAddedToVerifiedReading: roundDebugSeconds(secondsAddedToVerifiedReading),
-      totalVerifiedReadingSecondsAfterAdd: roundDebugSeconds(this.session.verifiedReadingSeconds)
+      minimumAllowedSeconds: roundDebugSeconds(minimumAllowedReadingSeconds),
+      maximumAllowedSeconds: roundDebugSeconds(maximumAllowedReadingSeconds),
+      secondsAdded: roundDebugSeconds(secondsAddedToVerifiedReading),
+      verifiedReadingSeconds: roundDebugSeconds(this.session.verifiedReadingSeconds),
+      minutesRead: this.session.minutesRead,
+      pagesRead: this.session.pagesRead,
+      highestPageRead: this.session.highestPageRead,
+      completionPercentage: this.session.completionPercentage,
+      progressVersion: this.progressVersion
     });
+    if (wasRevisitedAfterFailure) {
+      this.logReadingHistory("REVISITED_PAGE_CERTIFIED", {
+        locationKey: view.id,
+        pageNumber: pageLocationNumber,
+        secondsAdded: roundDebugSeconds(secondsAddedToVerifiedReading),
+        pagesReadBefore: pagesReadBefore,
+        pagesReadAfter: this.session.pagesRead,
+        highestPageReadBefore: highestPageReadBefore,
+        highestPageReadAfter: this.session.highestPageRead,
+        verifiedReadingSecondsBefore: roundDebugSeconds(verifiedReadingSecondsBefore),
+        verifiedReadingSecondsAfter: roundDebugSeconds(this.session.verifiedReadingSeconds),
+        completionPercentageBefore: completionPercentageBefore,
+        completionPercentageAfter: this.session.completionPercentage,
+        progressVersionBefore: progressVersionBefore,
+        progressVersionAfter: this.progressVersion
+      });
+    }
+    this.logReadingHistory("SESSION_SAVED", {
+      timestamp: new Date().toISOString(),
+      progressVersion: this.progressVersion,
+      pagesRead: this.session.pagesRead,
+      minutesRead: this.session.minutesRead,
+      verifiedReadingSeconds: roundDebugSeconds(this.session.verifiedReadingSeconds),
+      highestPageRead: this.session.highestPageRead,
+      completionPercentage: this.session.completionPercentage,
+      isCompleted: this.session.isCompleted
+    });
+    return { certified: true, reason: "certified" };
+  };
 
-    if (view.finalAnchor) this.session.finalAnchorCertified = true;
-    this.updatePayloadFields();
-    this.save();
-    if (this.session.isCompleted) this.queueSync("completed", { force: true });
-    return true;
+  ReadingHistoryManager.prototype.rejectView = function (view, reason) {
+    const wordCount = view && view.wordCount || 0;
+    const dwellSeconds = view ? Math.max(0, view.activeReadingMs / 1000) : 0;
+    if (view && view.id && reason !== "duplicate page/location") {
+      this.rejectedLocationKeys[view.id] = {
+        reason: reason,
+        rejectedAt: new Date().toISOString()
+      };
+    }
+    this.logReadingHistory("PAGE_REJECTED", {
+      locationKey: view && view.id || "",
+      pageNumber: view ? this.locationNumber(view.location) : 0,
+      dwellSeconds: roundDebugSeconds(dwellSeconds),
+      minimumAllowedSeconds: roundDebugSeconds(this.minimumAllowedSeconds(wordCount)),
+      maximumAllowedSeconds: roundDebugSeconds(this.maximumAllowedSeconds(wordCount)),
+      rejectionReason: reason
+    });
+    return { certified: false, reason: reason };
+  };
+
+  ReadingHistoryManager.prototype.pauseCurrentView = function () {
+    if (!this.currentView) return;
+    this.updateViewActiveTime(this.currentView, Date.now());
+    this.currentView.trackingActive = false;
   };
 
   ReadingHistoryManager.prototype.isActiveReadingNow = function () {
@@ -346,8 +482,21 @@
     view.lastAccountedAtMs = now;
   };
 
+  ReadingHistoryManager.prototype.minimumAllowedSeconds = function (wordCount) {
+    return wordCount > 0 ? (wordCount / MAX_READING_WPM) * 60 : 0;
+  };
+
+  ReadingHistoryManager.prototype.maximumAllowedSeconds = function (wordCount) {
+    return wordCount > 0 ? (wordCount / MIN_READING_WPM) * 60 : 0;
+  };
+
   ReadingHistoryManager.prototype.isCertified = function (locationId) {
     return this.session.certifiedLocations.indexOf(locationId) !== -1;
+  };
+
+  ReadingHistoryManager.prototype.bumpProgressVersion = function () {
+    this.progressVersion += 1;
+    this.session.progressVersion = this.progressVersion;
   };
 
   ReadingHistoryManager.prototype.updatePayloadFields = function () {
@@ -361,6 +510,9 @@
     this.session.completionPercentage = completion;
     this.session.isCompleted = completion >= COMPLETION_THRESHOLD && !!this.session.finalAnchorCertified;
     this.session.updatedAt = new Date().toISOString();
+    this.session.progressVersion = this.progressVersion;
+    this.session.lastSyncedProgressVersion = this.lastSyncedProgressVersion;
+    this.session.lastSuccessfulPayloadHash = this.lastSuccessfulPayloadHash;
     this.session.synced = false;
   };
 
@@ -375,10 +527,21 @@
 
   ReadingHistoryManager.prototype.locationId = function (location) {
     if (!location || !location.start) return "";
-    if (typeof location.start.location === "number" && location.start.location >= 0) {
-      return String(location.start.location);
+    const startCfi = location.start && location.start.cfi || "";
+    const endCfi = location.end && location.end.cfi || "";
+    if (startCfi && endCfi) {
+      return "cfi:" + startCfi + "|" + endCfi;
     }
-    return location.start.cfi || "";
+    if (startCfi) {
+      return "cfi:" + startCfi;
+    }
+    const locationNumber = typeof location.start.location === "number" && location.start.location >= 0
+      ? location.start.location
+      : -1;
+    if (locationNumber >= 0) {
+      return "loc:" + locationNumber;
+    }
+    return "";
   };
 
   ReadingHistoryManager.prototype.locationNumber = function (location) {
@@ -405,6 +568,14 @@
       if (!/^\d+$/.test(String(locationId))) return highest;
       return Math.max(highest, Number(locationId) + 1);
     }, 0);
+  };
+
+  ReadingHistoryManager.prototype.navigationDirection = function (pageNumber) {
+    const highestPageRead = this.session && this.session.highestPageRead || 0;
+    if (!pageNumber || !highestPageRead) return "unknown";
+    if (pageNumber > highestPageRead) return "forward-or-new";
+    if (pageNumber < highestPageRead) return "backward-or-return";
+    return "same-highest";
   };
 
   ReadingHistoryManager.prototype.isFinalAnchor = function (location) {
@@ -471,31 +642,95 @@
     if (!this.session) return;
     options = options || {};
     this.updatePayloadFields();
-    if (!this.hasNewVerifiedProgress() && !options.force) {
-      this.sync.retry({ keepalive: !!options.keepalive });
+    const payload = this.payload();
+    const payloadHash = stablePayloadHash(payload);
+    const progressChanged = this.hasUnsyncedProgress(payloadHash);
+    if (!payload || !payload.bookId) {
+      this.logSyncDecision({
+        pageWasNewlyCertified: !!options.pageWasNewlyCertified,
+        progressChanged: false,
+        payloadHashChanged: false,
+        finalSyncDecision: false,
+        skipReason: "invalid payload"
+      });
+      this.logSyncSkipped("invalid payload");
+      return;
+    }
+    if (!progressChanged && !options.force) {
+      this.logSyncDecision({
+        pageWasNewlyCertified: !!options.pageWasNewlyCertified,
+        progressChanged: false,
+        payloadHashChanged: payloadHash !== this.lastSuccessfulPayloadHash,
+        finalSyncDecision: false,
+        skipReason: "no progress change"
+      });
+      this.logSyncSkipped("no progress change");
+      this.sync.retry({ keepalive: !!options.keepalive, trigger: options.trigger || reason });
       return;
     }
 
-    const payload = this.payload();
     this.lastQueuedVerifiedSeconds = this.session.verifiedReadingSeconds;
     this.session.lastQueuedVerifiedSeconds = this.lastQueuedVerifiedSeconds;
-    this.storage.enqueue(this.session.bookId, payload, reason, this.session.pageContent);
+    this.storage.enqueueLatest(
+      this.session.bookId,
+      payload,
+      reason,
+      this.session.pageContent,
+      this.progressVersion,
+      payloadHash
+    );
     this.save();
-    this.sync.retry({ keepalive: !!options.keepalive });
+    this.logSyncDecision({
+      pageWasNewlyCertified: !!options.pageWasNewlyCertified,
+      progressChanged: progressChanged || !!options.force,
+      payloadHashChanged: payloadHash !== this.lastSuccessfulPayloadHash,
+      finalSyncDecision: true,
+      skipReason: ""
+    });
+    this.sync.retry({ keepalive: !!options.keepalive, trigger: options.trigger || reason });
   };
 
-  ReadingHistoryManager.prototype.syncIfDue = function () {
+  ReadingHistoryManager.prototype.hasUnsyncedProgress = function (payloadHash) {
+    return !!(this.session && (
+      this.progressVersion > this.lastSyncedProgressVersion ||
+      payloadHash !== this.lastSuccessfulPayloadHash
+    ));
+  };
+
+  ReadingHistoryManager.prototype.markSyncSucceeded = function (progressVersion, payloadHash) {
     if (!this.session) return;
-    const delta = this.session.verifiedReadingSeconds - this.lastSyncVerifiedSeconds;
-    if (delta >= SYNC_INTERVAL_SECONDS || this.session.isCompleted) {
-      this.lastSyncVerifiedSeconds = this.session.verifiedReadingSeconds;
-      this.session.lastSyncedVerifiedSeconds = this.lastSyncVerifiedSeconds;
-      this.queueSync("interval");
-    }
+    this.lastSyncedProgressVersion = Math.max(this.lastSyncedProgressVersion, Number(progressVersion) || 0);
+    this.lastSuccessfulPayloadHash = payloadHash || this.lastSuccessfulPayloadHash;
+    this.session.lastSyncedProgressVersion = this.lastSyncedProgressVersion;
+    this.session.lastSuccessfulPayloadHash = this.lastSuccessfulPayloadHash;
+    this.session.synced = this.progressVersion <= this.lastSyncedProgressVersion;
+    this.save();
   };
 
-  ReadingHistoryManager.prototype.hasNewVerifiedProgress = function () {
-    return this.session && this.session.verifiedReadingSeconds > this.lastQueuedVerifiedSeconds;
+  ReadingHistoryManager.prototype.logSyncSkipped = function (reason) {
+    this.logReadingHistory("SYNC_SKIPPED", { reason: reason });
+  };
+
+  ReadingHistoryManager.prototype.logSyncDecision = function (detail) {
+    detail = detail || {};
+    const payload = this.payload();
+    const payloadHash = stablePayloadHash(payload);
+    this.logReadingHistory("SYNC_DECISION", {
+      pageWasNewlyCertified: !!detail.pageWasNewlyCertified,
+      progressChanged: !!detail.progressChanged,
+      progressVersion: this.progressVersion,
+      lastSyncedProgressVersion: this.lastSyncedProgressVersion,
+      payloadHashChanged: typeof detail.payloadHashChanged === "boolean"
+        ? detail.payloadHashChanged
+        : payloadHash !== this.lastSuccessfulPayloadHash,
+      requestCurrentlyInProgress: !!(this.sync && this.sync.inFlight),
+      finalSyncDecision: !!detail.finalSyncDecision,
+      skipReason: detail.skipReason || ""
+    });
+  };
+
+  ReadingHistoryManager.prototype.logReadingHistory = function (eventName, detail) {
+    console.debug("READING_HISTORY", Object.assign({ event: eventName }, detail || {}));
   };
 
   ReadingHistoryManager.prototype.save = function () {
@@ -527,16 +762,31 @@
   };
 
   ReadingHistoryStorage.prototype.enqueue = function (bookId, payload, reason, pageContent) {
+    this.enqueueLatest(bookId, payload, reason, pageContent, 0, stablePayloadHash(payload));
+  };
+
+  ReadingHistoryStorage.prototype.enqueueLatest = function (
+    bookId,
+    payload,
+    reason,
+    pageContent,
+    progressVersion,
+    payloadHash
+  ) {
     const queue = this.loadQueue(bookId);
-    queue.push({
+    const latest = {
       id: "reading-history-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
       synced: false,
       payload: payload,
       pageContent: pageContent || "",
       reason: reason || "sync",
+      progressVersion: Number(progressVersion) || 0,
+      payloadHash: payloadHash || stablePayloadHash(payload),
       queuedAt: new Date().toISOString()
-    });
-    localStorage.setItem(this.queueKey(bookId), JSON.stringify(queue));
+    };
+    const synced = queue.filter(item => item.synced);
+    synced.push(latest);
+    localStorage.setItem(this.queueKey(bookId), JSON.stringify(synced));
   };
 
   ReadingHistoryStorage.prototype.loadQueue = function (bookId) {
@@ -546,6 +796,8 @@
       return Array.isArray(queue) ? queue.map(item => {
         if (!item.id) item.id = "reading-history-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
         if (typeof item.pageContent !== "string") item.pageContent = "";
+        if (typeof item.progressVersion !== "number") item.progressVersion = 0;
+        if (typeof item.payloadHash !== "string") item.payloadHash = stablePayloadHash(item.payload);
         return item;
       }) : [];
     } catch (err) {
@@ -557,30 +809,97 @@
     localStorage.setItem(this.queueKey(bookId), JSON.stringify(queue));
   };
 
-  function ReadingHistorySync(storage) {
+  function ReadingHistorySync(storage, manager) {
     this.storage = storage;
+    this.manager = manager;
     this.inFlight = false;
+    this.retryRequested = false;
     this.retry = this.retry.bind(this);
     window.addEventListener("reader-authenticated", this.retry, false);
   }
 
   ReadingHistorySync.prototype.retry = function (options) {
     options = options || {};
-    if (this.inFlight || !(window.readerContext && window.readerContext.bookId)) return;
-    if (window.readerAuth && window.readerAuth.isSessionExpired()) return;
+    const trigger = options.trigger || "retry";
+    if (this.inFlight) {
+      this.retryRequested = true;
+      this.logDecision(false, "request already in progress");
+      this.log("SYNC_SKIPPED", { reason: "request already in progress" });
+      return;
+    }
+    if (!(window.readerContext && window.readerContext.bookId)) {
+      this.logDecision(false, "invalid payload");
+      this.log("SYNC_SKIPPED", { reason: "invalid payload" });
+      return;
+    }
+    if (!window.readerFetch || !window.readerAuth || !window.readerAuth.isAuthenticated()) {
+      this.logDecision(false, "missing authentication");
+      this.log("SYNC_SKIPPED", { reason: "missing authentication" });
+      return;
+    }
+    if (window.readerAuth && window.readerAuth.isSessionExpired()) {
+      this.logDecision(false, "missing authentication");
+      this.log("SYNC_SKIPPED", { reason: "missing authentication" });
+      return;
+    }
     const bookId = window.readerContext.bookId;
     const queue = this.storage.loadQueue(bookId);
     const pending = queue.filter(item => !item.synced);
-    if (pending.length === 0) return;
+    if (pending.length === 0) {
+      this.logDecision(false, "no progress change");
+      this.log("SYNC_SKIPPED", { reason: "no progress change" });
+      return;
+    }
 
     this.inFlight = true;
-    const item = pending[0];
-    this.post(item.payload, { keepalive: !!options.keepalive }).then(() => {
-      this.storage.saveQueue(bookId, queue.filter(queued => queued.id !== item.id));
-    }).catch(() => {
-      this.storage.saveQueue(bookId, queue);
+    const item = pending[pending.length - 1];
+    this.storage.saveQueue(bookId, queue.filter(queued => queued.synced || queued.id === item.id));
+    this.log("SYNC_STARTED", {
+      trigger: trigger,
+      progressVersion: item.progressVersion,
+      payloadSummary: payloadSummary(item.payload)
+    });
+    this.post(item.payload, { keepalive: !!options.keepalive }).then(response => {
+      this.log("SYNC_SUCCEEDED", {
+        synchronizedProgressVersion: item.progressVersion,
+        responseStatus: response && response.status || 200
+      });
+      this.storage.saveQueue(bookId, this.storage.loadQueue(bookId).filter(queued => queued.id !== item.id));
+      if (this.manager) this.manager.markSyncSucceeded(item.progressVersion, item.payloadHash);
+    }).catch(err => {
+      const latestQueue = this.storage.loadQueue(bookId);
+      const hasPendingItem = latestQueue.some(queued => !queued.synced);
+      if (!hasPendingItem) latestQueue.push(item);
+      this.storage.saveQueue(bookId, latestQueue);
+      this.log("SYNC_FAILED", {
+        progressVersion: item.progressVersion,
+        error: err && err.message || String(err),
+        payloadRemainsQueued: true
+      });
     }).then(() => {
       this.inFlight = false;
+      if (this.retryRequested) {
+        this.retryRequested = false;
+        this.retry(options);
+      }
+    });
+  };
+
+  ReadingHistorySync.prototype.log = function (eventName, detail) {
+    if (this.manager && this.manager.logReadingHistory) {
+      this.manager.logReadingHistory(eventName, detail);
+    } else {
+      console.debug("READING_HISTORY", Object.assign({ event: eventName }, detail || {}));
+    }
+  };
+
+  ReadingHistorySync.prototype.logDecision = function (finalSyncDecision, skipReason) {
+    if (!this.manager || !this.manager.logSyncDecision) return;
+    this.manager.logSyncDecision({
+      pageWasNewlyCertified: false,
+      progressChanged: false,
+      finalSyncDecision: finalSyncDecision,
+      skipReason: skipReason || ""
     });
   };
 
@@ -615,7 +934,10 @@
         if (!response.ok) {
           throw new Error(data && data.message || "Unable to save the reading session.");
         }
-        return data;
+        return {
+          status: response.status,
+          data: data
+        };
       }));
     }
 
@@ -635,6 +957,30 @@
 
   function roundDebugSeconds(value) {
     return Math.round(value * 100) / 100;
+  }
+
+  function stablePayloadHash(payload) {
+    if (!payload) return "";
+    try {
+      return JSON.stringify(Object.keys(payload).sort().reduce((copy, key) => {
+        copy[key] = payload[key];
+        return copy;
+      }, {}));
+    } catch (err) {
+      return "";
+    }
+  }
+
+  function payloadSummary(payload) {
+    if (!payload) return {};
+    return {
+      bookId: payload.bookId,
+      pagesRead: payload.pagesRead,
+      highestPageRead: payload.highestPageRead,
+      minutesRead: payload.minutesRead,
+      isCompleted: payload.isCompleted,
+      completionPercentage: payload.completionPercentage
+    };
   }
 
   window.ReadingHistoryManager = ReadingHistoryManager;

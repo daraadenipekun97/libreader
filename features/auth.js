@@ -1,12 +1,14 @@
 (function () {
   "use strict";
 
+  //development
   // const API_BASE_URL = "https://backendnodedev-dot-starlit-advice-260914.appspot.com";
   // const LOCAL_READER_ORIGIN = "http://127.0.0.1:5501";
   // const LOCAL_PARENT_ORIGIN = "http://localhost:3001";
   // const PRODUCTION_PARENT_ORIGIN = "https://mylibribooks.com";
   
 
+  // uat (vercel deployment)
   const API_BASE_URL = "https://backendnodedev-dot-starlit-advice-260914.appspot.com";
   const LOCAL_READER_ORIGIN = "https://libreader.vercel.app";
   const LOCAL_PARENT_ORIGIN = "https://libweb.vercel.app";

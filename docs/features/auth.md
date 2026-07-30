@@ -17,6 +17,14 @@ The reader accepts only messages from the configured parent origin whose type is
 
 If no token exists when the local reader loads, authentication waits for the parent message. This avoids treating normal iframe startup timing as an expired session.
 
+### Vercel UAT
+
+- Parent application: `https://libweb.vercel.app`
+- Reader: `https://libreader.vercel.app`
+- Authentication: bearer token received from the parent with `postMessage`
+
+The Vercel reader is not on the MyLibriBooks production cookie domain, so it also waits for a parent token before calling `GET /api/user/session`. Once the token is received, requests use `Authorization: Bearer <token>` and omit cookies.
+
 ### Production
 
 - Parent application: `https://mylibribooks.com`

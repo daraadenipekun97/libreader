@@ -22,8 +22,13 @@
     return window.location.origin === LOCAL_READER_ORIGIN;
   }
 
+  function isTokenAuthEnvironment() {
+    return window.location.origin === LOCAL_READER_ORIGIN ||
+      window.location.origin === VERCEL_READER_ORIGIN;
+  }
+
   function shouldUseBearerToken() {
-    return isLocalDevelopment() || !!(authToken || readStoredToken());
+    return isTokenAuthEnvironment() || !!(authToken || readStoredToken());
   }
 
   function readStoredToken() {
@@ -96,7 +101,7 @@
     }
     if (verificationPromise) return verificationPromise;
 
-    if (isLocalDevelopment() && !(authToken || readStoredToken())) {
+    if (isTokenAuthEnvironment() && !(authToken || readStoredToken())) {
       authenticatedUser = null;
       console.warn("Reader authentication is waiting for a token from the parent application.");
       return Promise.resolve(null);

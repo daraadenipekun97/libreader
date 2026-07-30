@@ -36,14 +36,31 @@ Production API requests use `credentials: "include"`. Tokens in `sessionStorage`
 
 ## Parent Message Contract
 
+When a token-auth reader loads, it sends a ready message to the parent:
+
+```js
+window.parent.postMessage({
+  type: "MYLIBRI_READER_READY",
+  needsAuthToken: true,
+  reason: "auth-script-loaded"
+}, parentOrigin);
+```
+
+The parent application should listen for `MYLIBRI_READER_READY` and respond with:
+
 ```js
 readerIframe.contentWindow.postMessage({
   type: "MYLIBRI_AUTH_TOKEN",
   token: authToken
-}, "http://127.0.0.1:5501");
+}, readerOrigin);
 ```
 
-The reader validates both `event.origin` and `event.source`, then verifies the token through `GET /api/user/session`.
+Use these target origins:
+
+- Local reader: `http://127.0.0.1:5501`
+- Vercel reader: `https://libreader.vercel.app`
+
+The reader validates both `event.origin` and `event.source`, stores the token, then verifies it through `GET /api/user/session`.
 
 ## API Helper
 

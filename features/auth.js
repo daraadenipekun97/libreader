@@ -27,6 +27,12 @@
       window.location.origin === VERCEL_READER_ORIGIN;
   }
 
+  function parentOriginForCurrentReader() {
+    if (window.location.origin === LOCAL_READER_ORIGIN) return LOCAL_PARENT_ORIGIN;
+    if (window.location.origin === VERCEL_READER_ORIGIN) return VERCEL_PARENT_ORIGIN;
+    return PRODUCTION_PARENT_ORIGIN;
+  }
+
   function shouldUseBearerToken() {
     return isTokenAuthEnvironment() || !!(authToken || readStoredToken());
   }
@@ -104,6 +110,7 @@
     if (isTokenAuthEnvironment() && !(authToken || readStoredToken())) {
       authenticatedUser = null;
       console.warn("Reader authentication is waiting for a token from the parent application.");
+      requestAuthTokenFromParent("verify-without-token");
       return Promise.resolve(null);
     }
 
@@ -157,6 +164,25 @@
     storeToken(event.data.token.trim());
     authenticatedUser = null;
     verifyReaderUser().catch(() => {});
+  }
+
+  function requestAuthTokenFromParent(reason) {
+    if (!isTokenAuthEnvironment()) return;
+    if (window.parent === window) {
+      console.warn("Reader authentication is waiting for a parent iframe to provide a token.");
+      return;
+    }
+
+    const targetOrigin = parentOriginForCurrentReader();
+    try {
+      window.parent.postMessage({
+        type: "MYLIBRI_READER_READY",
+        needsAuthToken: true,
+        reason: reason || "reader-ready"
+      }, targetOrigin);
+    } catch (err) {
+      console.error("Unable to request reader authentication token from parent.", err);
+    }
   }
 
   function handleSessionExpiration() {
@@ -238,5 +264,6 @@
     whenVerified: whenVerified
   };
 
+  requestAuthTokenFromParent("auth-script-loaded");
   verifyReaderUser().catch(() => {});
 })();

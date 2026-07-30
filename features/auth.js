@@ -1,22 +1,16 @@
 (function () {
   "use strict";
 
-  //development
-  // const API_BASE_URL = "https://backendnodedev-dot-starlit-advice-260914.appspot.com";
-  // const LOCAL_READER_ORIGIN = "http://127.0.0.1:5501";
-  // const LOCAL_PARENT_ORIGIN = "http://localhost:3001";
-  // const PRODUCTION_PARENT_ORIGIN = "https://mylibribooks.com";
-  
-
-  // uat (vercel deployment)
   const API_BASE_URL = "https://backendnodedev-dot-starlit-advice-260914.appspot.com";
-  const LOCAL_READER_ORIGIN = "https://libreader.vercel.app";
-  const LOCAL_PARENT_ORIGIN = "https://libweb.vercel.app";
+  const LOCAL_READER_ORIGIN = "http://127.0.0.1:5501";
+  const VERCEL_READER_ORIGIN = "https://libreader.vercel.app";
+  const LOCAL_PARENT_ORIGIN = "http://localhost:3001";
+  const VERCEL_PARENT_ORIGIN = "https://libweb.vercel.app";
   const PRODUCTION_PARENT_ORIGIN = "https://mylibribooks.com";
 
   const TOKEN_STORAGE_KEY = "reader_auth_token";
   const REDIRECT_DELAY_MS = 5000;
-  const ALLOWED_PARENT_ORIGINS = [LOCAL_PARENT_ORIGIN, PRODUCTION_PARENT_ORIGIN];
+  const ALLOWED_PARENT_ORIGINS = [LOCAL_PARENT_ORIGIN, VERCEL_PARENT_ORIGIN, PRODUCTION_PARENT_ORIGIN];
 
   let authToken = readStoredToken();
   let authenticatedUser = null;
@@ -26,6 +20,10 @@
 
   function isLocalDevelopment() {
     return window.location.origin === LOCAL_READER_ORIGIN;
+  }
+
+  function shouldUseBearerToken() {
+    return isLocalDevelopment() || !!(authToken || readStoredToken());
   }
 
   function readStoredToken() {
@@ -64,7 +62,7 @@
     const headers = new Headers(options.headers || {});
     if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
-    if (isLocalDevelopment()) {
+    if (shouldUseBearerToken()) {
       const token = authToken || readStoredToken();
       if (token) headers.set("Authorization", "Bearer " + token);
       requestOptions.credentials = "omit";
@@ -167,7 +165,11 @@
     showSessionExpiredOverlay();
 
     window.setTimeout(() => {
-      const redirectUrl = isLocalDevelopment() ? LOCAL_PARENT_ORIGIN : PRODUCTION_PARENT_ORIGIN + "/";
+      const redirectUrl = isLocalDevelopment()
+        ? LOCAL_PARENT_ORIGIN
+        : window.location.origin === VERCEL_READER_ORIGIN
+          ? VERCEL_PARENT_ORIGIN
+          : PRODUCTION_PARENT_ORIGIN + "/";
       // The reader is embedded, so the top window must leave the whole application rather than only the iframe.
       window.top.location.href = redirectUrl;
     }, REDIRECT_DELAY_MS);
